@@ -1,0 +1,1263 @@
+     1→"use client";
+     2→import { useState, useEffect, useCallback } from "react";
+     3→import { Button } from "@/components/ui/button";
+     4→import { Input } from "@/components/ui/input";
+     5→import { Textarea } from "@/components/ui/textarea";
+     6→import { Label } from "@/components/ui/label";
+     7→import { Badge } from "@/components/ui/badge";
+     8→import { Skeleton } from "@/components/ui/skeleton";
+     9→import {
+    10→  Dialog,
+    11→  DialogContent,
+    12→  DialogDescription,
+    13→  DialogFooter,
+    14→  DialogHeader,
+    15→  DialogTitle,
+    16→} from "@/components/ui/dialog";
+    17→import {
+    18→  Sheet,
+    19→  SheetContent,
+    20→} from "@/components/ui/sheet";
+    21→import {
+    22→  AlertDialog,
+    23→  AlertDialogAction,
+    24→  AlertDialogCancel,
+    25→  AlertDialogContent,
+    26→  AlertDialogDescription,
+    27→  AlertDialogFooter,
+    28→  AlertDialogHeader,
+    29→  AlertDialogTitle,
+    30→} from "@/components/ui/alert-dialog";
+    31→import {
+    32→  Select,
+    33→  SelectContent,
+    34→  SelectItem,
+    35→  SelectTrigger,
+    36→  SelectValue,
+    37→} from "@/components/ui/select";
+    38→import {
+    39→  ViewHeader,
+    40→  SectionCard,
+    41→  EmptyState,
+    42→} from "@/components/shared/view-parts";
+    43→import {
+    44→  Users,
+    45→  UserPlus,
+    46→  Search,
+    47→  Phone,
+    48→  Mail,
+    49→  IdCard,
+    50→  MapPin,
+    51→  Car,
+    52→  Wrench,
+    53→  FileText,
+    54→  CalendarClock,
+    55→  Pencil,
+    56→  Trash2,
+    57→  Loader2,
+    58→  Plus,
+    59→  MessageCircle,
+    60→  ChevronRight,
+    61→  History,
+    62→  Gauge,
+    63→  Fuel,
+    64→} from "lucide-react";
+    65→import { motion } from "framer-motion";
+    66→import { toast } from "sonner";
+    67→import { formatCurrency, formatShortDate, formatDate } from "@/lib/nav-config";
+    68→
+    69→// ============================================================================
+    70→// Types
+    71→// ============================================================================
+    72→type Vehicle = {
+    73→  id: string;
+    74→  brand: string;
+    75→  model: string;
+    76→  year?: number | null;
+    77→  fuel?: string | null;
+    78→  engine?: string | null;
+    79→  engineCode?: string | null;
+    80→  chassis?: string | null;
+    81→  plate?: string | null;
+    82→  mileage: number;
+    83→  nextService?: string | null;
+    84→  notes?: string | null;
+    85→  createdAt: string;
+    86→};
+    87→
+    88→type ServiceOrder = {
+    89→  id: string;
+    90→  title: string;
+    91→  description?: string | null;
+    92→  status: string;
+    93→  priority: string;
+    94→  totalCost: number;
+    95→  scheduledAt?: string | null;
+    96→  completedAt?: string | null;
+    97→  createdAt: string;
+    98→  vehicle?: { id: string; brand: string; model: string; plate?: string | null } | null;
+    99→};
+   100→
+   101→type Quote = {
+   102→  id: string;
+   103→  number: string;
+   104→  status: string;
+   105→  total: number;
+   106→  createdAt: string;
+   107→};
+   108→
+   109→type Appointment = {
+   110→  id: string;
+   111→  title: string;
+   112→  type: string;
+   113→  status: string;
+   114→  startDate: string;
+   115→};
+   116→
+   117→type CustomerListItem = {
+   118→  id: string;
+   119→  name: string;
+   120→  phone?: string | null;
+   121→  whatsapp?: string | null;
+   122→  email?: string | null;
+   123→  document?: string | null;
+   124→  address?: string | null;
+   125→  notes?: string | null;
+   126→  createdAt: string;
+   127→  vehicles: Vehicle[];
+   128→  _count?: { services: number; quotes: number; appointments: number };
+   129→};
+   130→
+   131→type CustomerDetail = CustomerListItem & {
+   132→  services: ServiceOrder[];
+   133→  quotes: Quote[];
+   134→  appointments: Appointment[];
+   135→};
+   136→
+   137→// ============================================================================
+   138→// Helpers
+   139→// ============================================================================
+   140→function getInitials(name: string): string {
+   141→  if (!name) return "?";
+   142→  const parts = name.trim().split(/\s+/);
+   143→  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+   144→  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+   145→}
+   146→
+   147→function maskPlate(plate?: string | null): string {
+   148→  return (plate || "-").toUpperCase();
+   149→}
+   150→
+   151→function formatMileage(km: number): string {
+   152→  if (!km) return "0 km";
+   153→  return `${km.toLocaleString("pt-BR")} km`;
+   154→}
+   155→
+   156→// ============================================================================
+   157→// Main component
+   158→// ============================================================================
+   159→export function Customers() {
+   160→  const [query, setQuery] = useState("");
+   161→  const [debouncedQuery, setDebouncedQuery] = useState("");
+   162→  const [customers, setCustomers] = useState<CustomerListItem[]>([]);
+   163→  const [loading, setLoading] = useState(true);
+   164→  const [selectedId, setSelectedId] = useState<string | null>(null);
+   165→  const [createOpen, setCreateOpen] = useState(false);
+   166→
+   167→  // Debounce search input
+   168→  useEffect(() => {
+   169→    const t = setTimeout(() => setDebouncedQuery(query.trim()), 300);
+   170→    return () => clearTimeout(t);
+   171→  }, [query]);
+   172→
+   173→  const fetchList = useCallback(async () => {
+   174→    setLoading(true);
+   175→    try {
+   176→      const url = `/api/customers${debouncedQuery ? `?q=${encodeURIComponent(debouncedQuery)}` : ""}`;
+   177→      const res = await fetch(url, { cache: "no-store" });
+   178→      const json = await res.json();
+   179→      if (json.error) throw new Error(json.error);
+   180→      setCustomers(json.data ?? []);
+   181→    } catch (err: any) {
+   182→      toast.error(err?.message || "Erro ao carregar clientes");
+   183→      setCustomers([]);
+   184→    } finally {
+   185→      setLoading(false);
+   186→    }
+   187→  }, [debouncedQuery]);
+   188→
+   189→  useEffect(() => {
+   190→    fetchList();
+   191→  }, [fetchList]);
+   192→
+   193→  const handleCreated = (customer: CustomerListItem) => {
+   194→    setCustomers((prev) => [customer, ...prev]);
+   195→    setCreateOpen(false);
+   196→    toast.success("Cliente cadastrado com sucesso");
+   197→  };
+   198→
+   199→  const handleUpdated = (updated: CustomerListItem) => {
+   200→    setCustomers((prev) =>
+   201→      prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c))
+   202→    );
+   203→    // Refresh detail if it's the open one
+   204→    if (selectedId === updated.id) {
+   205→      // detail will be re-fetched by the DetailPanel via key change
+   206→      setSelectedId(null);
+   207→      setTimeout(() => setSelectedId(updated.id), 50);
+   208→    }
+   209→  };
+   210→
+   211→  const handleDeleted = (id: string) => {
+   212→    setCustomers((prev) => prev.filter((c) => c.id !== id));
+   213→    setSelectedId(null);
+   214→    toast.success("Cliente excluído");
+   215→  };
+   216→
+   217→  return (
+   218→    <div>
+   219→      <ViewHeader
+   220→        title="Cadastro de Clientes"
+   221→        description="Gerencie clientes, veículos e histórico de serviços."
+   222→        icon={<Users className="h-5 w-5" />}
+   223→        accent="orange"
+   224→        actions={
+   225→          <Button
+   226→            onClick={() => setCreateOpen(true)}
+   227→            className="gradient-orange text-primary-foreground glow-orange"
+   228→            size="sm"
+   229→          >
+   230→            <UserPlus className="h-4 w-4" />
+   231→            <span className="hidden sm:inline">Novo cliente</span>
+   232→            <span className="sm:hidden">Novo</span>
+   233→          </Button>
+   234→        }
+   235→      />
+   236→
+   237→      {/* Search bar */}
+   238→      <SectionCard className="mb-4">
+   239→        <div className="relative">
+   240→          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+   241→          <Input
+   242→            value={query}
+   243→            onChange={(e) => setQuery(e.target.value)}
+   244→            placeholder="Buscar por nome, telefone, CPF/CNPJ ou e-mail..."
+   245→            className="h-10 rounded-xl border-border bg-background/50 pl-9"
+   246→          />
+   247→        </div>
+   248→        {!loading && (
+   249→          <p className="mt-2 text-xs text-muted-foreground">
+   250→            {customers.length} cliente{customers.length === 1 ? "" : "s"}
+   251→            {debouncedQuery ? ` para "${debouncedQuery}"` : ""}
+   252→          </p>
+   253→        )}
+   254→      </SectionCard>
+   255→
+   256→      {/* Customer list */}
+   257→      {loading ? (
+   258→        <SectionCard>
+   259→          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+   260→            {Array.from({ length: 6 }).map((_, i) => (
+   261→              <CustomerCardSkeleton key={i} />
+   262→            ))}
+   263→          </div>
+   264→        </SectionCard>
+   265→      ) : customers.length === 0 ? (
+   266→        <SectionCard>
+   267→          <EmptyState
+   268→            icon={<Users className="h-10 w-10 opacity-40" />}
+   269→            title={debouncedQuery ? "Nenhum cliente encontrado" : "Nenhum cliente cadastrado"}
+   270→            description={
+   271→              debouncedQuery
+   272→                ? "Tente outro termo de busca."
+   273→                : "Comece cadastrando seu primeiro cliente."
+   274→            }
+   275→            action={
+   276→              !debouncedQuery && (
+   277→                <Button
+   278→                  onClick={() => setCreateOpen(true)}
+   279→                  className="gradient-orange text-primary-foreground glow-orange"
+   280→                  size="sm"
+   281→                >
+   282→                  <UserPlus className="h-4 w-4" /> Novo cliente
+   283→                </Button>
+   284→              )
+   285→            }
+   286→          />
+   287→        </SectionCard>
+   288→      ) : (
+   289→        <SectionCard className="p-0 sm:p-0">
+   290→          <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3 sm:p-5">
+   291→            {customers.map((c, i) => (
+   292→              <motion.button
+   293→                key={c.id}
+   294→                onClick={() => setSelectedId(c.id)}
+   295→                initial={{ opacity: 0, y: 6 }}
+   296→                animate={{ opacity: 1, y: 0 }}
+   297→                transition={{ delay: Math.min(i * 0.02, 0.2) }}
+   298→                whileHover={{ y: -2 }}
+   299→                className="card-premium group flex flex-col gap-3 rounded-2xl border border-border bg-card/50 p-4 text-left backdrop-blur-sm"
+   300→              >
+   301→                <div className="flex items-start gap-3">
+   302→                  <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl gradient-orange text-sm font-bold text-primary-foreground">
+   303→                    {getInitials(c.name)}
+   304→                  </div>
+   305→                  <div className="min-w-0 flex-1">
+   306→                    <p className="truncate text-sm font-semibold text-foreground">
+   307→                      {c.name}
+   308→                    </p>
+   309→                    <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted-foreground">
+   310→                      <Phone className="h-3 w-3" />
+   311→                      {c.phone || "Sem telefone"}
+   312→                    </p>
+   313→                  </div>
+   314→                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition group-hover:text-orange-400" />
+   315→                </div>
+   316→
+   317→                <div className="grid grid-cols-2 gap-2 text-[11px]">
+   318→                  <div className="flex items-center gap-1 rounded-md bg-background/40 px-2 py-1">
+   319→                    <IdCard className="h-3 w-3 text-blue-300" />
+   320→                    <span className="truncate text-muted-foreground">
+   321→                      {c.document || "Sem CPF"}
+   322→                    </span>
+   323→                  </div>
+   324→                  <div className="flex items-center gap-1 rounded-md bg-background/40 px-2 py-1">
+   325→                    <Car className="h-3 w-3 text-orange-400" />
+   326→                    <span className="text-muted-foreground">
+   327→                      {c.vehicles.length} veíc.
+   328→                    </span>
+   329→                  </div>
+   330→                </div>
+   331→
+   332→                <div className="flex flex-wrap items-center gap-1.5">
+   333→                  <Badge
+   334→                    variant="outline"
+   335→                    className="border-border text-[10px] font-normal text-muted-foreground"
+   336→                  >
+   337→                    <Wrench className="mr-0.5 h-3 w-3" />
+   338→                    {c._count?.services ?? 0} OS
+   339→                  </Badge>
+   340→                  <Badge
+   341→                    variant="outline"
+   342→                    className="border-border text-[10px] font-normal text-muted-foreground"
+   343→                  >
+   344→                    <FileText className="mr-0.5 h-3 w-3" />
+   345→                    {c._count?.quotes ?? 0} orç.
+   346→                  </Badge>
+   347→                  <span className="ml-auto text-[10px] text-muted-foreground">
+   348→                    {formatShortDate(c.createdAt)}
+   349→                  </span>
+   350→                </div>
+   351→              </motion.button>
+   352→            ))}
+   353→          </div>
+   354→        </SectionCard>
+   355→      )}
+   356→
+   357→      {/* Create dialog */}
+   358→      <CustomerFormDialog
+   359→        open={createOpen}
+   360→        onOpenChange={setCreateOpen}
+   361→        onSaved={handleCreated}
+   362→      />
+   363→
+   364→      {/* Detail panel */}
+   365→      <CustomerDetailPanel
+   366→        customerId={selectedId}
+   367→        onClose={() => setSelectedId(null)}
+   368→        onUpdated={handleUpdated}
+   369→        onDeleted={handleDeleted}
+   370→      />
+   371→    </div>
+   372→  );
+   373→}
+   374→
+   375→// ============================================================================
+   376→// Customer card skeleton
+   377→// ============================================================================
+   378→function CustomerCardSkeleton() {
+   379→  return (
+   380→    <div className="rounded-2xl border border-border bg-card/40 p-4">
+   381→      <div className="flex items-center gap-3">
+   382→        <Skeleton className="h-11 w-11 rounded-xl" />
+   383→        <div className="flex-1 space-y-2">
+   384→          <Skeleton className="h-3 w-3/4" />
+   385→          <Skeleton className="h-2.5 w-1/2" />
+   386→        </div>
+   387→      </div>
+   388→      <div className="mt-3 grid grid-cols-2 gap-2">
+   389→        <Skeleton className="h-6 w-full" />
+   390→        <Skeleton className="h-6 w-full" />
+   391→      </div>
+   392→      <div className="mt-3 flex gap-2">
+   393→        <Skeleton className="h-5 w-14" />
+   394→        <Skeleton className="h-5 w-14" />
+   395→      </div>
+   396→    </div>
+   397→  );
+   398→}
+   399→
+   400→// ============================================================================
+   401→// Customer form (create / edit)
+   402→// ============================================================================
+   403→type CustomerFormData = {
+   404→  name: string;
+   405→  phone: string;
+   406→  whatsapp: string;
+   407→  email: string;
+   408→  document: string;
+   409→  address: string;
+   410→  notes: string;
+   411→};
+   412→
+   413→const emptyForm: CustomerFormData = {
+   414→  name: "",
+   415→  phone: "",
+   416→  whatsapp: "",
+   417→  email: "",
+   418→  document: "",
+   419→  address: "",
+   420→  notes: "",
+   421→};
+   422→
+   423→function CustomerFormDialog({
+   424→  open,
+   425→  onOpenChange,
+   426→  onSaved,
+   427→  customer,
+   428→}: {
+   429→  open: boolean;
+   430→  onOpenChange: (v: boolean) => void;
+   431→  onSaved?: (c: CustomerListItem) => void;
+   432→  customer?: CustomerListItem | null;
+   433→}) {
+   434→  const [form, setForm] = useState<CustomerFormData>(emptyForm);
+   435→  const [saving, setSaving] = useState(false);
+   436→  const isEdit = !!customer;
+   437→
+   438→  useEffect(() => {
+   439→    if (open) {
+   440→      setForm(
+   441→        customer
+   442→          ? {
+   443→              name: customer.name || "",
+   444→              phone: customer.phone || "",
+   445→              whatsapp: customer.whatsapp || "",
+   446→              email: customer.email || "",
+   447→              document: customer.document || "",
+   448→              address: customer.address || "",
+   449→              notes: customer.notes || "",
+   450→            }
+   451→          : emptyForm
+   452→      );
+   453→    }
+   454→  }, [open, customer]);
+   455→
+   456→  const set = (k: keyof CustomerFormData, v: string) =>
+   457→    setForm((prev) => ({ ...prev, [k]: v }));
+   458→
+   459→  const submit = async () => {
+   460→    if (!form.name.trim()) {
+   461→      toast.error("Nome é obrigatório");
+   462→      return;
+   463→    }
+   464→    if (!form.phone.trim()) {
+   465→      toast.error("Telefone é obrigatório");
+   466→      return;
+   467→    }
+   468→    setSaving(true);
+   469→    try {
+   470→      const url = isEdit
+   471→        ? `/api/customers/${customer!.id}`
+   472→        : "/api/customers";
+   473→      const res = await fetch(url, {
+   474→        method: isEdit ? "PUT" : "POST",
+   475→        headers: { "Content-Type": "application/json" },
+   476→        body: JSON.stringify(form),
+   477→      });
+   478→      const json = await res.json();
+   479→      if (json.error) throw new Error(json.error);
+   480→      onSaved?.(json.data);
+   481→      onOpenChange(false);
+   482→      toast.success(isEdit ? "Cliente atualizado" : "Cliente cadastrado");
+   483→    } catch (err: any) {
+   484→      toast.error(err?.message || "Erro ao salvar cliente");
+   485→    } finally {
+   486→      setSaving(false);
+   487→    }
+   488→  };
+   489→
+   490→  return (
+   491→    <Dialog open={open} onOpenChange={onOpenChange}>
+   492→      <DialogContent className="max-h-[90vh] overflow-y-auto scrollbar-premium sm:max-w-2xl">
+   493→        <DialogHeader>
+   494→          <DialogTitle className="flex items-center gap-2">
+   495→            <UserPlus className="h-5 w-5 text-orange-400" />
+   496→            {isEdit ? "Editar cliente" : "Novo cliente"}
+   497→          </DialogTitle>
+   498→          <DialogDescription>
+   499→            {isEdit
+   500→              ? "Atualize os dados do cliente. Campos com * são obrigatórios."
+   501→              : "Preencha os dados do cliente. Campos com * são obrigatórios."}
+   502→          </DialogDescription>
+   503→        </DialogHeader>
+   504→
+   505→        <div className="grid gap-4 sm:grid-cols-2">
+   506→          <Field label="Nome *" className="sm:col-span-2">
+   507→            <Input
+   508→              value={form.name}
+   509→              onChange={(e) => set("name", e.target.value)}
+   510→              placeholder="Nome completo ou razão social"
+   511→              className="border-border bg-background/50"
+   512→              autoFocus
+   513→            />
+   514→          </Field>
+   515→
+   516→          <Field label="Telefone *">
+   517→            <div className="relative">
+   518→              <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+   519→              <Input
+   520→                value={form.phone}
+   521→                onChange={(e) => set("phone", e.target.value)}
+   522→                placeholder="(11) 99999-9999"
+   523→                className="border-border bg-background/50 pl-9"
+   524→              />
+   525→            </div>
+   526→          </Field>
+   527→
+   528→          <Field label="WhatsApp">
+   529→            <div className="relative">
+   530→              <MessageCircle className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+   531→              <Input
+   532→                value={form.whatsapp}
+   533→                onChange={(e) => set("whatsapp", e.target.value)}
+   534→                placeholder="Mesmo do telefone ou outro"
+   535→                className="border-border bg-background/50 pl-9"
+   536→              />
+   537→            </div>
+   538→          </Field>
+   539→
+   540→          <Field label="E-mail">
+   541→            <div className="relative">
+   542→              <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+   543→              <Input
+   544→                value={form.email}
+   545→                onChange={(e) => set("email", e.target.value)}
+   546→                placeholder="cliente@email.com"
+   547→                type="email"
+   548→                className="border-border bg-background/50 pl-9"
+   549→              />
+   550→            </div>
+   551→          </Field>
+   552→
+   553→          <Field label="CPF / CNPJ">
+   554→            <div className="relative">
+   555→              <IdCard className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+   556→              <Input
+   557→                value={form.document}
+   558→                onChange={(e) => set("document", e.target.value)}
+   559→                placeholder="000.000.000-00"
+   560→                className="border-border bg-background/50 pl-9"
+   561→              />
+   562→            </div>
+   563→          </Field>
+   564→
+   565→          <Field label="Endereço" className="sm:col-span-2">
+   566→            <div className="relative">
+   567→              <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+   568→              <Input
+   569→                value={form.address}
+   570→                onChange={(e) => set("address", e.target.value)}
+   571→                placeholder="Rua, número, bairro, cidade"
+   572→                className="border-border bg-background/50 pl-9"
+   573→              />
+   574→            </div>
+   575→          </Field>
+   576→
+   577→          <Field label="Observações" className="sm:col-span-2">
+   578→            <Textarea
+   579→              value={form.notes}
+   580→              onChange={(e) => set("notes", e.target.value)}
+   581→              placeholder="Preferências, histórico, alertas..."
+   582→              className="min-h-20 resize-y border-border bg-background/50"
+   583→            />
+   584→          </Field>
+   585→        </div>
+   586→
+   587→        <DialogFooter className="gap-2">
+   588→          <Button
+   589→            variant="outline"
+   590→            onClick={() => onOpenChange(false)}
+   591→            className="border-border"
+   592→            disabled={saving}
+   593→          >
+   594→            Cancelar
+   595→          </Button>
+   596→          <Button
+   597→            onClick={submit}
+   598→            disabled={saving}
+   599→            className="gradient-orange text-primary-foreground glow-orange"
+   600→          >
+   601→            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+   602→            {isEdit ? "Salvar alterações" : "Cadastrar cliente"}
+   603→          </Button>
+   604→        </DialogFooter>
+   605→      </DialogContent>
+   606→    </Dialog>
+   607→  );
+   608→}
+   609→
+   610→function Field({
+   611→  label,
+   612→  children,
+   613→  className,
+   614→}: {
+   615→  label: string;
+   616→  children: React.ReactNode;
+   617→  className?: string;
+   618→}) {
+   619→  return (
+   620→    <div className={className}>
+   621→      <Label className="mb-1.5 text-xs text-muted-foreground">{label}</Label>
+   622→      {children}
+   623→    </div>
+   624→  );
+   625→}
+   626→
+   627→// ============================================================================
+   628→// Vehicle form (inline, for adding inside detail panel)
+   629→// ============================================================================
+   630→type VehicleFormData = {
+   631→  brand: string;
+   632→  model: string;
+   633→  year: string;
+   634→  fuel: string;
+   635→  engine: string;
+   636→  plate: string;
+   637→  mileage: string;
+   638→};
+   639→
+   640→const emptyVehicle: VehicleFormData = {
+   641→  brand: "",
+   642→  model: "",
+   643→  year: "",
+   644→  fuel: "",
+   645→  engine: "",
+   646→  plate: "",
+   647→  mileage: "",
+   648→};
+   649→
+   650→function VehicleForm({
+   651→  onSave,
+   652→}: {
+   653→  onSave: (v: VehicleFormData) => Promise<void>;
+   654→}) {
+   655→  const [form, setForm] = useState<VehicleFormData>(emptyVehicle);
+   656→  const [saving, setSaving] = useState(false);
+   657→  const [show, setShow] = useState(false);
+   658→
+   659→  const set = (k: keyof VehicleFormData, v: string) =>
+   660→    setForm((prev) => ({ ...prev, [k]: v }));
+   661→
+   662→  const submit = async () => {
+   663→    if (!form.brand.trim() && !form.model.trim() && !form.plate.trim()) {
+   664→      toast.error("Informe marca, modelo ou placa do veículo");
+   665→      return;
+   666→    }
+   667→    setSaving(true);
+   668→    try {
+   669→      await onSave(form);
+   670→      setForm(emptyVehicle);
+   671→      setShow(false);
+   672→    } finally {
+   673→      setSaving(false);
+   674→    }
+   675→  };
+   676→
+   677→  if (!show) {
+   678→    return (
+   679→      <Button
+   680→        onClick={() => setShow(true)}
+   681→        variant="outline"
+   682→        size="sm"
+   683→        className="w-full border-dashed border-border text-muted-foreground hover:text-orange-400"
+   684→      >
+   685→        <Plus className="h-4 w-4" /> Adicionar veículo
+   686→      </Button>
+   687→    );
+   688→  }
+   689→
+   690→  return (
+   691→    <div className="space-y-3 rounded-xl border border-border bg-background/40 p-3">
+   692→      <div className="grid gap-3 sm:grid-cols-2">
+   693→        <Field label="Marca *">
+   694→          <Input
+   695→            value={form.brand}
+   696→            onChange={(e) => set("brand", e.target.value)}
+   697→            placeholder="Chevrolet, Toyota..."
+   698→            className="border-border bg-background/50"
+   699→          />
+   700→        </Field>
+   701→        <Field label="Modelo *">
+   702→          <Input
+   703→            value={form.model}
+   704→            onChange={(e) => set("model", e.target.value)}
+   705→            placeholder="Onix, Corolla..."
+   706→            className="border-border bg-background/50"
+   707→          />
+   708→        </Field>
+   709→        <Field label="Ano">
+   710→          <Input
+   711→            value={form.year}
+   712→            onChange={(e) => set("year", e.target.value)}
+   713→            placeholder="2020"
+   714→            inputMode="numeric"
+   715→            className="border-border bg-background/50"
+   716→          />
+   717→        </Field>
+   718→        <Field label="Placa">
+   719→          <Input
+   720→            value={form.plate}
+   721→            onChange={(e) => set("plate", e.target.value.toUpperCase())}
+   722→            placeholder="ABC1D23"
+   723→            className="border-border bg-background/50 uppercase"
+   724→          />
+   725→        </Field>
+   726→        <Field label="Combustível">
+   727→          <Select value={form.fuel || "none"} onValueChange={(v) => set("fuel", v === "none" ? "" : v)}>
+   728→            <SelectTrigger className="border-border bg-background/50">
+   729→              <SelectValue placeholder="Selecionar..." />
+   730→            </SelectTrigger>
+   731→            <SelectContent>
+   732→              <SelectItem value="none">—</SelectItem>
+   733→              <SelectItem value="Flex">Flex</SelectItem>
+   734→              <SelectItem value="Gasolina">Gasolina</SelectItem>
+   735→              <SelectItem value="Etanol">Etanol</SelectItem>
+   736→              <SelectItem value="Diesel">Diesel</SelectItem>
+   737→              <SelectItem value="Híbrido">Híbrido</SelectItem>
+   738→              <SelectItem value="Elétrico">Elétrico</SelectItem>
+   739→              <SelectItem value="GNV">GNV</SelectItem>
+   740→            </SelectContent>
+   741→          </Select>
+   742→        </Field>
+   743→        <Field label="Motor">
+   744→          <Input
+   745→            value={form.engine}
+   746→            onChange={(e) => set("engine", e.target.value)}
+   747→            placeholder="1.4 8V, 1.0 Turbo..."
+   748→            className="border-border bg-background/50"
+   749→          />
+   750→        </Field>
+   751→        <Field label="Quilometragem" className="sm:col-span-2">
+   752→          <Input
+   753→            value={form.mileage}
+   754→            onChange={(e) => set("mileage", e.target.value)}
+   755→            placeholder="0"
+   756→            inputMode="numeric"
+   757→            className="border-border bg-background/50"
+   758→          />
+   759→        </Field>
+   760→      </div>
+   761→      <div className="flex gap-2">
+   762→        <Button
+   763→          variant="outline"
+   764→          size="sm"
+   765→          onClick={() => {
+   766→            setForm(emptyVehicle);
+   767→            setShow(false);
+   768→          }}
+   769→          className="border-border"
+   770→          disabled={saving}
+   771→        >
+   772→          Cancelar
+   773→        </Button>
+   774→        <Button
+   775→          onClick={submit}
+   776→          size="sm"
+   777→          disabled={saving}
+   778→          className="gradient-orange text-primary-foreground glow-orange"
+   779→        >
+   780→          {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+   781→          Salvar veículo
+   782→        </Button>
+   783→      </div>
+   784→    </div>
+   785→  );
+   786→}
+   787→
+   788→// ============================================================================
+   789→// Detail panel (Sheet on mobile, side dialog on desktop)
+   790→// ============================================================================
+   791→function CustomerDetailPanel({
+   792→  customerId,
+   793→  onClose,
+   794→  onUpdated,
+   795→  onDeleted,
+   796→}: {
+   797→  customerId: string | null;
+   798→  onClose: () => void;
+   799→  onUpdated: (c: CustomerListItem) => void;
+   800→  onDeleted: (id: string) => void;
+   801→}) {
+   802→  const [detail, setDetail] = useState<CustomerDetail | null>(null);
+   803→  const [loading, setLoading] = useState(false);
+   804→  const [editOpen, setEditOpen] = useState(false);
+   805→  const [deleteOpen, setDeleteOpen] = useState(false);
+   806→  const [deleting, setDeleting] = useState(false);
+   807→
+   808→  useEffect(() => {
+   809→    if (!customerId) {
+   810→      setDetail(null);
+   811→      return;
+   812→    }
+   813→    let mounted = true;
+   814→    setLoading(true);
+   815→    setDetail(null);
+   816→    fetch(`/api/customers/${customerId}`, { cache: "no-store" })
+   817→      .then((r) => r.json())
+   818→      .then((json) => {
+   819→        if (!mounted) return;
+   820→        if (json.error) throw new Error(json.error);
+   821→        setDetail(json.data);
+   822→      })
+   823→      .catch((err) => {
+   824→        if (mounted) toast.error(err?.message || "Erro ao carregar cliente");
+   825→      })
+   826→      .finally(() => mounted && setLoading(false));
+   827→    return () => {
+   828→      mounted = false;
+   829→    };
+   830→  }, [customerId]);
+   831→
+   832→  const handleAddVehicle = async (v: VehicleFormData) => {
+   833→    if (!customerId) return;
+   834→    try {
+   835→      const res = await fetch(`/api/customers/${customerId}`, {
+   836→        method: "PUT",
+   837→        headers: { "Content-Type": "application/json" },
+   838→        body: JSON.stringify({
+   839→          name: detail?.name,
+   840→          phone: detail?.phone,
+   841→          whatsapp: detail?.whatsapp,
+   842→          email: detail?.email,
+   843→          document: detail?.document,
+   844→          address: detail?.address,
+   845→          notes: detail?.notes,
+   846→          newVehicle: v,
+   847→        }),
+   848→      });
+   849→      const json = await res.json();
+   850→      if (json.error) throw new Error(json.error);
+   851→      setDetail(json.data);
+   852→      onUpdated(json.data);
+   853→      toast.success("Veículo adicionado");
+   854→    } catch (err: any) {
+   855→      toast.error(err?.message || "Erro ao adicionar veículo");
+   856→      throw err;
+   857→    }
+   858→  };
+   859→
+   860→  const handleDelete = async () => {
+   861→    if (!customerId) return;
+   862→    setDeleting(true);
+   863→    try {
+   864→      const res = await fetch(`/api/customers/${customerId}`, {
+   865→        method: "DELETE",
+   866→      });
+   867→      const json = await res.json();
+   868→      if (json.error) throw new Error(json.error);
+   869→      onDeleted(customerId);
+   870→      setDeleteOpen(false);
+   871→    } catch (err: any) {
+   872→      toast.error(err?.message || "Erro ao excluir cliente");
+   873→    } finally {
+   874→      setDeleting(false);
+   875→    }
+   876→  };
+   877→
+   878→  const content = (
+   879→    <div className="flex h-full flex-col">
+   880→      {/* Header */}
+   881→      <div className="border-b border-border bg-gradient-navy p-5">
+   882→        {loading || !detail ? (
+   883→          <div className="space-y-3">
+   884→            <div className="flex items-center gap-3">
+   885→              <Skeleton className="h-12 w-12 rounded-xl" />
+   886→              <div className="flex-1 space-y-2">
+   887→                <Skeleton className="h-4 w-3/4" />
+   888→                <Skeleton className="h-3 w-1/2" />
+   889→              </div>
+   890→            </div>
+   891→          </div>
+   892→        ) : (
+   893→          <div className="flex items-start gap-3">
+   894→            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl gradient-orange text-base font-bold text-primary-foreground">
+   895→              {getInitials(detail.name)}
+   896→            </div>
+   897→            <div className="min-w-0 flex-1">
+   898→              <h2 className="truncate text-lg font-bold text-foreground">
+   899→                {detail.name}
+   900→              </h2>
+   901→              <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
+   902→                {detail.phone && (
+   903→                  <a
+   904→                    href={`tel:${detail.phone}`}
+   905→                    className="inline-flex items-center gap-1 hover:text-orange-400"
+   906→                  >
+   907→                    <Phone className="h-3 w-3" /> {detail.phone}
+   908→                  </a>
+   909→                )}
+   910→                {detail.whatsapp && (
+   911→                  <a
+   912→                    href={`https://wa.me/55${detail.whatsapp.replace(/\D/g, "")}`}
+   913→                    target="_blank"
+   914→                    rel="noopener noreferrer"
+   915→                    className="inline-flex items-center gap-1 hover:text-emerald-400"
+   916→                  >
+   917→                    <MessageCircle className="h-3 w-3" /> WhatsApp
+   918→                  </a>
+   919→                )}
+   920→              </div>
+   921→            </div>
+   922→            <div className="flex shrink-0 gap-1">
+   923→              <Button
+   924→                size="icon"
+   925→                variant="outline"
+   926→                className="h-8 w-8 border-border"
+   927→                onClick={() => setEditOpen(true)}
+   928→                aria-label="Editar"
+   929→              >
+   930→                <Pencil className="h-3.5 w-3.5" />
+   931→              </Button>
+   932→              <Button
+   933→                size="icon"
+   934→                variant="outline"
+   935→                className="h-8 w-8 border-red-500/30 text-red-400 hover:bg-red-500/10"
+   936→                onClick={() => setDeleteOpen(true)}
+   937→                aria-label="Excluir"
+   938→              >
+   939→                <Trash2 className="h-3.5 w-3.5" />
+   940→              </Button>
+   941→            </div>
+   942→          </div>
+   943→        )}
+   944→      </div>
+   945→
+   946→      {/* Body */}
+   947→      <div className="flex-1 overflow-y-auto scrollbar-premium p-5">
+   948→        {loading || !detail ? (
+   949→          <div className="space-y-3">
+   950→            <Skeleton className="h-20 w-full" />
+   951→            <Skeleton className="h-20 w-full" />
+   952→            <Skeleton className="h-20 w-full" />
+   953→          </div>
+   954→        ) : (
+   955→          <div className="space-y-6">
+   956→            {/* Contact info */}
+   957→            <section className="space-y-2">
+   958→              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+   959→                Contato
+   960→              </h3>
+   961→              <div className="grid gap-2 rounded-xl border border-border bg-background/40 p-3 text-xs">
+   962→                {detail.email && (
+   963→                  <InfoRow icon={<Mail className="h-3.5 w-3.5" />} label="E-mail" value={detail.email} />
+   964→                )}
+   965→                {detail.document && (
+   966→                  <InfoRow icon={<IdCard className="h-3.5 w-3.5" />} label="CPF/CNPJ" value={detail.document} />
+   967→                )}
+   968→                {detail.address && (
+   969→                  <InfoRow icon={<MapPin className="h-3.5 w-3.5" />} label="Endereço" value={detail.address} />
+   970→                )}
+   971→                {!detail.email && !detail.document && !detail.address && (
+   972→                  <p className="text-muted-foreground">
+   973→                    Sem informações de contato adicionais.
+   974→                  </p>
+   975→                )}
+   976→              </div>
+   977→              {detail.notes && (
+   978→                <div className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-3 text-xs">
+   979→                  <p className="mb-1 font-semibold text-orange-400">Observações</p>
+   980→                  <p className="whitespace-pre-wrap text-muted-foreground">
+   981→                    {detail.notes}
+   982→                  </p>
+   983→                </div>
+   984→              )}
+   985→            </section>
+   986→
+   987→            {/* Vehicles */}
+   988→            <section className="space-y-2">
+   989→              <div className="flex items-center justify-between">
+   990→                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+   991→                  Veículos ({detail.vehicles.length})
+   992→                </h3>
+   993→              </div>
+   994→              <div className="max-h-80 space-y-2 overflow-y-auto scrollbar-premium pr-1">
+   995→                {detail.vehicles.length === 0 ? (
+   996→                  <p className="rounded-xl border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
+   997→                    Nenhum veículo cadastrado
+   998→                  </p>
+   999→                ) : (
+  1000→                  detail.vehicles.map((v) => (
+  1001→                    <article
+  1002→                      key={v.id}
+  1003→                      className="rounded-xl border border-border bg-background/40 p-3"
+  1004→                    >
+  1005→                      <div className="flex items-start justify-between gap-2">
+  1006→                        <div className="min-w-0">
+  1007→                          <p className="truncate text-sm font-semibold text-foreground">
+  1008→                            {v.brand} {v.model}
+  1009→                            {v.year ? ` • ${v.year}` : ""}
+  1010→                          </p>
+  1011→                          <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+  1012→                            {v.plate && (
+  1013→                              <Badge
+  1014→                                variant="outline"
+  1015→                                className="border-orange-500/30 bg-orange-500/10 text-[10px] font-bold text-orange-300"
+  1016→                              >
+  1017→                                {maskPlate(v.plate)}
+  1018→                              </Badge>
+  1019→                            )}
+  1020→                            {v.fuel && (
+  1021→                              <span className="inline-flex items-center gap-0.5">
+  1022→                                <Fuel className="h-3 w-3" /> {v.fuel}
+  1023→                              </span>
+  1024→                            )}
+  1025→                            {v.engine && (
+  1026→                              <span className="inline-flex items-center gap-0.5">
+  1027→                                <Gauge className="h-3 w-3" /> {v.engine}
+  1028→                              </span>
+  1029→                            )}
+  1030→                            <span className="inline-flex items-center gap-0.5">
+  1031→                              <Gauge className="h-3 w-3" /> {formatMileage(v.mileage)}
+  1032→                            </span>
+  1033→                          </div>
+  1034→                        </div>
+  1035→                        {v.nextService && (
+  1036→                          <Badge
+  1037→                            variant="outline"
+  1038→                            className="border-blue-500/30 bg-blue-500/10 text-[10px] text-blue-300"
+  1039→                          >
+  1040→                            <CalendarClock className="mr-1 h-3 w-3" />
+  1041→                            {formatShortDate(v.nextService)}
+  1042→                          </Badge>
+  1043→                        )}
+  1044→                      </div>
+  1045→                    </article>
+  1046→                  ))
+  1047→                )}
+  1048→              </div>
+  1049→              <VehicleForm onSave={handleAddVehicle} />
+  1050→            </section>
+  1051→
+  1052→            {/* Recent service orders */}
+  1053→            <section className="space-y-2">
+  1054→              <div className="flex items-center justify-between">
+  1055→                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+  1056→                  Ordens de serviço ({detail.services.length})
+  1057→                </h3>
+  1058→              </div>
+  1059→              <div className="max-h-72 space-y-2 overflow-y-auto scrollbar-premium pr-1">
+  1060→                {detail.services.length === 0 ? (
+  1061→                  <p className="rounded-xl border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
+  1062→                    Nenhuma ordem de serviço registrada
+  1063→                  </p>
+  1064→                ) : (
+  1065→                  detail.services.map((s) => (
+  1066→                    <article
+  1067→                      key={s.id}
+  1068→                      className="rounded-xl border border-border bg-background/40 p-3 text-xs"
+  1069→                    >
+  1070→                      <div className="flex items-start justify-between gap-2">
+  1071→                        <div className="min-w-0">
+  1072→                          <p className="truncate font-medium text-foreground">
+  1073→                            {s.title}
+  1074→                          </p>
+  1075→                          {s.vehicle && (
+  1076→                            <p className="mt-0.5 truncate text-muted-foreground">
+  1077→                              {s.vehicle.brand} {s.vehicle.model}
+  1078→                              {s.vehicle.plate ? ` • ${s.vehicle.plate}` : ""}
+  1079→                            </p>
+  1080→                          )}
+  1081→                        </div>
+  1082→                        <ServiceStatusBadge status={s.status} />
+  1083→                      </div>
+  1084→                      <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
+  1085→                        <span className="inline-flex items-center gap-1">
+  1086→                          <History className="h-3 w-3" />
+  1087→                          {formatDate(s.createdAt)}
+  1088→                        </span>
+  1089→                        {s.totalCost > 0 && (
+  1090→                          <span className="font-semibold text-emerald-400">
+  1091→                            {formatCurrency(s.totalCost)}
+  1092→                          </span>
+  1093→                        )}
+  1094→                      </div>
+  1095→                    </article>
+  1096→                  ))
+  1097→                )}
+  1098→              </div>
+  1099→            </section>
+  1100→
+  1101→            {/* Quotes summary */}
+  1102→            {detail.quotes.length > 0 && (
+  1103→              <section className="space-y-2">
+  1104→                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+  1105→                  Orçamentos recentes
+  1106→                </h3>
+  1107→                <div className="space-y-1.5">
+  1108→                  {detail.quotes.slice(0, 5).map((q) => (
+  1109→                    <div
+  1110→                      key={q.id}
+  1111→                      className="flex items-center justify-between rounded-lg border border-border bg-background/40 p-2 text-xs"
+  1112→                    >
+  1113→                      <span className="truncate font-mono text-muted-foreground">
+  1114→                        #{q.number}
+  1115→                      </span>
+  1116→                      <div className="flex items-center gap-2">
+  1117→                        <Badge
+  1118→                          variant="outline"
+  1119→                          className="border-border text-[10px]"
+  1120→                        >
+  1121→                          {quoteStatusLabel(q.status)}
+  1122→                        </Badge>
+  1123→                        <span className="font-semibold text-foreground">
+  1124→                          {formatCurrency(q.total)}
+  1125→                        </span>
+  1126→                      </div>
+  1127→                    </div>
+  1128→                  ))}
+  1129→                </div>
+  1130→              </section>
+  1131→            )}
+  1132→          </div>
+  1133→        )}
+  1134→      </div>
+  1135→
+  1136→      {/* Footer actions */}
+  1137→      {!loading && detail && (
+  1138→        <div className="border-t border-border bg-card/50 p-3">
+  1139→          <div className="flex items-center gap-2">
+  1140→            {detail.phone && (
+  1141→              <Button asChild variant="outline" size="sm" className="flex-1 border-border">
+  1142→                <a href={`tel:${detail.phone}`}>
+  1143→                  <Phone className="h-3.5 w-3.5" /> Ligar
+  1144→                </a>
+  1145→              </Button>
+  1146→            )}
+  1147→            {detail.whatsapp && (
+  1148→              <Button asChild variant="outline" size="sm" className="flex-1 border-emerald-500/30 text-emerald-400">
+  1149→                <a
+  1150→                  href={`https://wa.me/55${detail.whatsapp.replace(/\D/g, "")}`}
+  1151→                  target="_blank"
+  1152→                  rel="noopener noreferrer"
+  1153→                >
+  1154→                  <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
+  1155→                </a>
+  1156→              </Button>
+  1157→            )}
+  1158→          </div>
+  1159→        </div>
+  1160→      )}
+  1161→
+  1162→      {/* Edit dialog (rendered inside; needs customer) */}
+  1163→      {detail && (
+  1164→        <CustomerFormDialog
+  1165→          open={editOpen}
+  1166→          onOpenChange={setEditOpen}
+  1167→          customer={detail}
+  1168→          onSaved={(c) => {
+  1169→            setDetail((d) => (d ? { ...d, ...c } : d));
+  1170→            onUpdated(c);
+  1171→          }}
+  1172→        />
+  1173→      )}
+  1174→
+  1175→      {/* Delete confirm */}
+  1176→      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+  1177→        <AlertDialogContent>
+  1178→          <AlertDialogHeader>
+  1179→            <AlertDialogTitle>Excluir cliente?</AlertDialogTitle>
+  1180→            <AlertDialogDescription>
+  1181→              Esta ação não pode ser desfeita. Todos os veículos, ordens de
+  1182→              serviço, orçamentos e agendamentos vinculados também serão
+  1183→              removidos.
+  1184→            </AlertDialogDescription>
+  1185→          </AlertDialogHeader>
+  1186→          <AlertDialogFooter>
+  1187→            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+  1188→            <AlertDialogAction
+  1189→              onClick={handleDelete}
+  1190→              disabled={deleting}
+  1191→              className="bg-destructive text-white hover:bg-destructive/90"
+  1192→            >
+  1193→              {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
+  1194→              Excluir
+  1195→            </AlertDialogAction>
+  1196→          </AlertDialogFooter>
+  1197→        </AlertDialogContent>
+  1198→      </AlertDialog>
+  1199→    </div>
+  1200→  );
+  1201→
+  1202→  return (
+  1203→    <>
+  1204→      {/* Side panel — slides from right on all breakpoints (mobile full, desktop panel) */}
+  1205→      <Sheet open={!!customerId} onOpenChange={(o) => !o && onClose()}>
+  1206→        <SheetContent
+  1207→          side="right"
+  1208→          className="flex w-full flex-col gap-0 p-0 sm:max-w-md lg:max-w-xl"
+  1209→        >
+  1210→          {content}
+  1211→        </SheetContent>
+  1212→      </Sheet>
+  1213→    </>
+  1214→  );
+  1215→}
+  1216→
+  1217→function InfoRow({
+  1218→  icon,
+  1219→  label,
+  1220→  value,
+  1221→}: {
+  1222→  icon: React.ReactNode;
+  1223→  label: string;
+  1224→  value: string;
+  1225→}) {
+  1226→  return (
+  1227→    <div className="flex items-start gap-2">
+  1228→      <span className="mt-0.5 text-orange-400">{icon}</span>
+  1229→      <div className="min-w-0 flex-1">
+  1230→        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+  1231→          {label}
+  1232→        </p>
+  1233→        <p className="truncate text-foreground">{value}</p>
+  1234→      </div>
+  1235→    </div>
+  1236→  );
+  1237→}
+  1238→
+  1239→function ServiceStatusBadge({ status }: { status: string }) {
+  1240→  const map: Record<string, { label: string; className: string }> = {
+  1241→    pending: { label: "Pendente", className: "border-amber-500/30 bg-amber-500/10 text-amber-300" },
+  1242→    in_progress: { label: "Em andamento", className: "border-blue-500/30 bg-blue-500/10 text-blue-300" },
+  1243→    done: { label: "Concluído", className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" },
+  1244→    cancelled: { label: "Cancelado", className: "border-red-500/30 bg-red-500/10 text-red-300" },
+  1245→  };
+  1246→  const s = map[status] || map.pending;
+  1247→  return (
+  1248→    <Badge variant="outline" className={`shrink-0 text-[10px] ${s.className}`}>
+  1249→      {s.label}
+  1250→    </Badge>
+  1251→  );
+  1252→}
+  1253→
+  1254→function quoteStatusLabel(status: string): string {
+  1255→  const map: Record<string, string> = {
+  1256→    draft: "Rascunho",
+  1257→    sent: "Enviado",
+  1258→    approved: "Aprovado",
+  1259→    rejected: "Rejeitado",
+  1260→  };
+  1261→  return map[status] || status;
+  1262→}
+  1263→

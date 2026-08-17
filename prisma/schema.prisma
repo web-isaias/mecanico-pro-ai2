@@ -1,0 +1,203 @@
+// Mecânico Pro AI - Prisma Schema
+// SQLite database for workshop management
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ===================== CLIENTES =====================
+model Customer {
+  id          String   @id @default(cuid())
+  name        String
+  phone       String?
+  whatsapp    String?
+  email       String?
+  document    String? // CPF or CNPJ
+  address     String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  vehicles    Vehicle[]
+  quotes      Quote[]
+  services    ServiceOrder[]
+  appointments Appointment[] @relation("AppointmentCustomer")
+}
+
+// ===================== VEÍCULOS =====================
+model Vehicle {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  brand       String
+  model       String
+  year        Int?
+  fuel        String? // Flex, Gasolina, Diesel, etc.
+  engine      String? // ex: 1.4, 1.0 Turbo
+  engineCode  String?
+  chassis     String?
+  plate       String?
+  mileage     Int     @default(0)
+  nextService DateTime?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  serviceOrders ServiceOrder[]
+  quotes        Quote[]
+}
+
+// ===================== ORDEM DE SERVIÇO =====================
+model ServiceOrder {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  vehicleId   String?
+  vehicle     Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  title       String
+  description String?
+  status      String   @default("pending") // pending, in_progress, done, cancelled
+  priority    String   @default("normal") // low, normal, high, urgent
+  laborCost   Float    @default(0)
+  partsCost   Float    @default(0)
+  totalCost   Float    @default(0)
+  warranty    String? // prazo de garantia
+  scheduledAt DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items       ServiceItem[]
+}
+
+model ServiceItem {
+  id          String   @id @default(cuid())
+  serviceOrderId String
+  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  description String
+  type        String   @default("service") // service, part
+  quantity    Float    @default(1)
+  unitPrice   Float    @default(0)
+  total       Float    @default(0)
+}
+
+// ===================== ORÇAMENTOS =====================
+model Quote {
+  id          String   @id @default(cuid())
+  number      String   @unique
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  vehicleId   String?
+  vehicle     Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  items       String   // JSON string of items
+  laborTotal  Float    @default(0)
+  partsTotal  Float    @default(0)
+  taxPercent  Float    @default(0)
+  discount    Float    @default(0)
+  total       Float    @default(0)
+  status      String   @default("draft") // draft, sent, approved, rejected
+  notes       String?
+  signature   String? // digital signature data URL
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ===================== AGENDA =====================
+model Appointment {
+  id          String   @id @default(cuid())
+  title       String
+  customerId  String?
+  customer    Customer? @relation("AppointmentCustomer", fields: [customerId], references: [id], onDelete: SetNull)
+  vehicleDesc String?
+  type        String   @default("service") // service, delivery, review, maintenance
+  status      String   @default("scheduled") // scheduled, confirmed, done, cancelled
+  startDate   DateTime
+  endDate     DateTime?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ===================== FINANCEIRO =====================
+model Transaction {
+  id          String   @id @default(cuid())
+  type        String   // income, expense
+  category    String   // service, parts, labor, rent, utility, other
+  description String
+  amount      Float
+  date        DateTime @default(now())
+  status      String   @default("paid") // paid, pending
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ===================== ESTOQUE =====================
+model InventoryItem {
+  id          String   @id @default(cuid())
+  name        String
+  sku         String?
+  barcode     String?
+  category    String   @default("parts") // parts, tools, fluids
+  supplier    String?
+  quantity    Int      @default(0)
+  minStock    Int      @default(0)
+  purchasePrice Float  @default(0)
+  salePrice   Float    @default(0)
+  unit        String   @default("un")
+  location    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Supplier {
+  id          String   @id @default(cuid())
+  name        String
+  phone       String?
+  email       String?
+  cnpj        String?
+  address     String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ===================== BANCO DE DEFEITOS =====================
+model Defect {
+  id          String   @id @default(cuid())
+  author      String   @default("Anônimo")
+  vehicleDesc String
+  symptom     String
+  diagnosis   String
+  solution    String
+  photos      String?  // JSON array of URLs
+  repairTime  String?
+  difficulty  String   @default("medium") // easy, medium, hard
+  likes       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ===================== OBD2 HISTÓRICO =====================
+model ObdScan {
+  id          String   @id @default(cuid())
+  vehicleDesc String?
+  codes       String   // JSON array
+  status      String   @default("active") // active, cleared
+  notes       String?
+  createdAt   DateTime @default(now())
+}
+
+// ===================== NOTIFICAÇÕES =====================
+model Notification {
+  id          String   @id @default(cuid())
+  type        String   // review, oil, timing_belt, brakes, tires, warranty, appointment, stock
+  title       String
+  message     String
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
