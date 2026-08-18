@@ -1,6 +1,6 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# See https://help.github.com/articles/ignoring-files/ for about ignoring files.
 
-# dependencies
+# ===================== dependencies =====================
 node_modules
 /.pnp
 .pnp.*
@@ -9,46 +9,72 @@ node_modules
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
+bun.lockb
 
-# testing
+# ===================== testing =====================
 /coverage
 
-# next.js
+# ===================== next.js =====================
 /.next/
 /out/
 
-# production
+# ===================== production =====================
 /build
+/standalone
 
-# misc
+# ===================== misc =====================
 .DS_Store
 *.pem
+Thumbs.db
 
-# debug
+# ===================== debug =====================
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# ===================== env files =====================
+# NÃO subir .env com credenciais — use .env.example como template
+.env
+.env*.local
+.env.production
 
-# vercel
+# ===================== vercel =====================
 .vercel
 
-
-# typescript
+# ===================== typescript =====================
 *.tsbuildinfo
 next-env.d.ts
-local-*
-.claude
-.z-ai-config
+
+# ===================== logs =====================
 *.log
 dev.log
 dev.out.log
-test
-prompt
-
 server.log
-# Skills directory
+
+# ===================== banco de dados SQLite =====================
+# O banco é gerado pelo `bun run db:push` — nunca subir o arquivo .db
+db/*.db
+db/*.db-journal
+db/*.db-wal
+db/*.db-shm
+*.sqlite
+*.sqlite3
+
+# ===================== arquivos do sandbox =====================
+worklog.md
+screenshot-*.png
+mecanico-pro-ai.tar.gz
+
+# ===================== pastas auxiliares do ambiente =====================
 /skills/
+/examples/
+/tests/
+/tool-results/
+/download/
+/upload/
+/mini-services/
+.claude
+.z-ai-config
+prompt
+local-*
