@@ -1,5 +1,6 @@
 // Seed script - run with: bun run db:seed
 import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
@@ -7,6 +8,7 @@ async function main() {
   console.log("🌱 Seeding database...");
 
   // Clear existing
+  await prisma.subscription.deleteMany();
   await prisma.notification.deleteMany();
   await prisma.obdScan.deleteMany();
   await prisma.defect.deleteMany();
@@ -19,10 +21,29 @@ async function main() {
   await prisma.quote.deleteMany();
   await prisma.vehicle.deleteMany();
   await prisma.customer.deleteMany();
+  await prisma.user.deleteMany();
+
+  // ===== Demo user (workshop owner account) =====
+  const passwordHash = await bcrypt.hash("demo1234", 12);
+  const demoUser = await prisma.user.create({
+    data: {
+      email: "demo@mecanicopro.ai",
+      name: "Mecânico Master",
+      workshopName: "Oficina Premium",
+      passwordHash,
+      role: "owner",
+      subscriptionStatus: "active",
+      plan: "annual",
+      subscriptionId: "demo_active_sub",
+      currentPeriodEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+    },
+  });
+  console.log(`   ✓ Demo user: demo@mecanicopro.ai / demo1234`);
 
   // ===== Customers + Vehicles =====
   const c1 = await prisma.customer.create({
     data: {
+      userId: demoUser.id,
       name: "João Silva",
       phone: "(11) 98765-4321",
       whatsapp: "5511987654321",
@@ -50,6 +71,7 @@ async function main() {
 
   const c2 = await prisma.customer.create({
     data: {
+      userId: demoUser.id,
       name: "Maria Oliveira",
       phone: "(11) 91234-5678",
       whatsapp: "5511912345678",
@@ -84,6 +106,7 @@ async function main() {
 
   const c3 = await prisma.customer.create({
     data: {
+      userId: demoUser.id,
       name: "Carlos Ferreira",
       phone: "(21) 99999-1111",
       whatsapp: "5521999991111",
@@ -108,6 +131,7 @@ async function main() {
 
   const c4 = await prisma.customer.create({
     data: {
+      userId: demoUser.id,
       name: "Ana Souza",
       phone: "(47) 98888-2222",
       whatsapp: "5547988882222",
@@ -140,6 +164,7 @@ async function main() {
   await prisma.appointment.createMany({
     data: [
       {
+        userId: demoUser.id,
         title: "Troca de óleo + filtros",
         customerId: c1.id,
         vehicleDesc: "Honda Civic 2.0 - ABC1D23",
@@ -150,6 +175,7 @@ async function main() {
         notes: "Óleo 0W20, filtro de óleo e ar",
       },
       {
+        userId: demoUser.id,
         title: "Diagnóstico luz da injeção",
         customerId: c2.id,
         vehicleDesc: "Chevrolet Onix 1.4 - DEF4G56",
@@ -160,6 +186,7 @@ async function main() {
         notes: "Cliente relata código P0171",
       },
       {
+        userId: demoUser.id,
         title: "Revisão 60mil km",
         customerId: c3.id,
         vehicleDesc: "VW Gol 1.6 - JKL0M12",
@@ -169,6 +196,7 @@ async function main() {
         endDate: todayAt(17, 0),
       },
       {
+        userId: demoUser.id,
         title: "Troca de pastilhas de freio",
         customerId: c4.id,
         vehicleDesc: "Toyota Corolla 1.8 - MNO3P45",
@@ -178,6 +206,7 @@ async function main() {
         endDate: todayAt(17, 30),
       },
       {
+        userId: demoUser.id,
         title: "Alinhamento e balanceamento",
         type: "service",
         status: "scheduled",
@@ -193,6 +222,7 @@ async function main() {
   tomorrow.setHours(10, 0, 0, 0);
   await prisma.appointment.create({
     data: {
+      userId: demoUser.id,
       title: "Revisão completa",
       customerId: c2.id,
       vehicleDesc: "Fiat Mobi 1.0 - GHI7H89",
@@ -208,6 +238,7 @@ async function main() {
   await prisma.serviceOrder.createMany({
     data: [
       {
+        userId: demoUser.id,
         customerId: c1.id,
         vehicleId: v1?.id,
         title: "Troca de óleo e filtros",
@@ -222,6 +253,7 @@ async function main() {
         scheduledAt: new Date(Date.now() - 7 * 86400000),
       },
       {
+        userId: demoUser.id,
         customerId: c2.id,
         title: "Diagnóstico eletrônico",
         description: "Scanner OBD2, verificação de sensores",
@@ -234,6 +266,7 @@ async function main() {
         scheduledAt: new Date(Date.now() - 14 * 86400000),
       },
       {
+        userId: demoUser.id,
         customerId: c3.id,
         title: "Troca de pastilhas e discos",
         description: "Pastilhas dianteiras, discs ventilados",
@@ -245,6 +278,7 @@ async function main() {
         scheduledAt: new Date(),
       },
       {
+        userId: demoUser.id,
         customerId: c4.id,
         title: "Revisão 45mil km",
         description: "Revisão completa conforme manual",
@@ -262,23 +296,23 @@ async function main() {
   // ===== Inventory =====
   await prisma.inventoryItem.createMany({
     data: [
-      { name: "Filtro de óleo Onix 1.4", sku: "FO-ONX-14", barcode: "7891234", category: "parts", supplier: "AutoPeças SP", quantity: 12, minStock: 5, purchasePrice: 18, salePrice: 35, unit: "un", location: "Prateleira A1" },
-      { name: "Filtro de óleo Gol 1.0", sku: "FO-GOL-10", barcode: "7895678", category: "parts", supplier: "AutoPeças SP", quantity: 3, minStock: 8, purchasePrice: 15, salePrice: 30, unit: "un", location: "Prateleira A2" },
-      { name: "Óleo 5W30 Sintético 1L", sku: "OL-5W30-1L", barcode: "7899012", category: "fluids", supplier: "Lubrificantes BR", quantity: 45, minStock: 20, purchasePrice: 28, salePrice: 45, unit: "L", location: "Estante B1" },
-      { name: "Vela NGK BKR6E-11", sku: "VL-NGK-BKR6E11", barcode: "7893456", category: "parts", supplier: "NGK Brasil", quantity: 24, minStock: 12, purchasePrice: 12, salePrice: 25, unit: "un", location: "Prateleira C3" },
-      { name: "Pastilha de freio Civic 2.0", sku: "PF-CIV-20", barcode: "7897890", category: "parts", supplier: "Freios Premium", quantity: 2, minStock: 4, purchasePrice: 85, salePrice: 160, unit: "jogo", location: "Prateleira D1" },
-      { name: "Fluido de freio DOT 4 1L", sku: "FF-DOT4-1L", barcode: "7892345", category: "fluids", supplier: "Lubrificantes BR", quantity: 18, minStock: 6, purchasePrice: 22, salePrice: 38, unit: "L", location: "Estante B2" },
-      { name: "Líquido de arrefecimento 5L", sku: "LA-ROSA-5L", barcode: "7896789", category: "fluids", supplier: "Lubrificantes BR", quantity: 9, minStock: 5, purchasePrice: 38, salePrice: 65, unit: "gal", location: "Estante B3" },
-      { name: "Chave torx T50", sku: "FR-TX-T50", category: "tools", quantity: 5, minStock: 2, purchasePrice: 18, salePrice: 0, unit: "un", location: "Caixa de ferramentas" },
+      { userId: demoUser.id, name: "Filtro de óleo Onix 1.4", sku: "FO-ONX-14", barcode: "7891234", category: "parts", supplier: "AutoPeças SP", quantity: 12, minStock: 5, purchasePrice: 18, salePrice: 35, unit: "un", location: "Prateleira A1" },
+      { userId: demoUser.id, name: "Filtro de óleo Gol 1.0", sku: "FO-GOL-10", barcode: "7895678", category: "parts", supplier: "AutoPeças SP", quantity: 3, minStock: 8, purchasePrice: 15, salePrice: 30, unit: "un", location: "Prateleira A2" },
+      { userId: demoUser.id, name: "Óleo 5W30 Sintético 1L", sku: "OL-5W30-1L", barcode: "7899012", category: "fluids", supplier: "Lubrificantes BR", quantity: 45, minStock: 20, purchasePrice: 28, salePrice: 45, unit: "L", location: "Estante B1" },
+      { userId: demoUser.id, name: "Vela NGK BKR6E-11", sku: "VL-NGK-BKR6E11", barcode: "7893456", category: "parts", supplier: "NGK Brasil", quantity: 24, minStock: 12, purchasePrice: 12, salePrice: 25, unit: "un", location: "Prateleira C3" },
+      { userId: demoUser.id, name: "Pastilha de freio Civic 2.0", sku: "PF-CIV-20", barcode: "7897890", category: "parts", supplier: "Freios Premium", quantity: 2, minStock: 4, purchasePrice: 85, salePrice: 160, unit: "jogo", location: "Prateleira D1" },
+      { userId: demoUser.id, name: "Fluido de freio DOT 4 1L", sku: "FF-DOT4-1L", barcode: "7892345", category: "fluids", supplier: "Lubrificantes BR", quantity: 18, minStock: 6, purchasePrice: 22, salePrice: 38, unit: "L", location: "Estante B2" },
+      { userId: demoUser.id, name: "Líquido de arrefecimento 5L", sku: "LA-ROSA-5L", barcode: "7896789", category: "fluids", supplier: "Lubrificantes BR", quantity: 9, minStock: 5, purchasePrice: 38, salePrice: 65, unit: "gal", location: "Estante B3" },
+      { userId: demoUser.id, name: "Chave torx T50", sku: "FR-TX-T50", category: "tools", quantity: 5, minStock: 2, purchasePrice: 18, salePrice: 0, unit: "un", location: "Caixa de ferramentas" },
     ],
   });
 
   // ===== Suppliers =====
   await prisma.supplier.createMany({
     data: [
-      { name: "AutoPeças SP", phone: "(11) 3333-4444", email: "vendas@autopecassp.com.br", cnpj: "11.222.333/0001-44", address: "Av. Industrial, 500 - São Paulo/SP" },
-      { name: "Lubrificantes BR", phone: "(11) 4444-5555", email: "contato@lubbr.com.br", cnpj: "22.333.444/0001-55" },
-      { name: "NGK Brasil", phone: "(11) 5555-6666", email: "comercial@ngk.com.br", cnpj: "33.444.555/0001-66" },
+      { userId: demoUser.id, name: "AutoPeças SP", phone: "(11) 3333-4444", email: "vendas@autopecassp.com.br", cnpj: "11.222.333/0001-44", address: "Av. Industrial, 500 - São Paulo/SP" },
+      { userId: demoUser.id, name: "Lubrificantes BR", phone: "(11) 4444-5555", email: "contato@lubbr.com.br", cnpj: "22.333.444/0001-55" },
+      { userId: demoUser.id, name: "NGK Brasil", phone: "(11) 5555-6666", email: "comercial@ngk.com.br", cnpj: "33.444.555/0001-66" },
     ],
   });
 
@@ -291,6 +325,7 @@ async function main() {
     const categories = ["service", "parts", "labor", "rent", "utility"];
     await prisma.transaction.create({
       data: {
+        userId: demoUser.id,
         type: isIncome ? "income" : "expense",
         category: isIncome ? (i % 2 === 0 ? "service" : "parts") : categories[3 + (i % 2)],
         description: isIncome
@@ -305,6 +340,7 @@ async function main() {
   // Today transactions
   await prisma.transaction.create({
     data: {
+      userId: demoUser.id,
       type: "income",
       category: "service",
       description: "Troca de óleo - Honda Civic",
@@ -315,6 +351,7 @@ async function main() {
   });
   await prisma.transaction.create({
     data: {
+      userId: demoUser.id,
       type: "income",
       category: "parts",
       description: "Venda de pastilhas avulso",
@@ -325,6 +362,7 @@ async function main() {
   });
   await prisma.transaction.create({
     data: {
+      userId: demoUser.id,
       type: "expense",
       category: "parts",
       description: "Compra de filtros - AutoPeças SP",
@@ -338,6 +376,7 @@ async function main() {
   await prisma.defect.createMany({
     data: [
       {
+        userId: demoUser.id,
         author: "Marcos Oficina",
         vehicleDesc: "Chevrolet Onix 1.4 2017",
         symptom: "Luz da injeção acesa, motor falhando em marcha lenta",
@@ -348,6 +387,7 @@ async function main() {
         likes: 24,
       },
       {
+        userId: demoUser.id,
         author: "AutoMec Team",
         vehicleDesc: "Volkswagen Gol 1.0 2014",
         symptom: "Carro não pega de manhã, só empurrando",
@@ -358,6 +398,7 @@ async function main() {
         likes: 18,
       },
       {
+        userId: demoUser.id,
         author: "Eletricista Paulo",
         vehicleDesc: "Fiat Mobi 1.0 2019",
         symptom: "Bateria descarregando do dia para a noite",
@@ -368,6 +409,7 @@ async function main() {
         likes: 31,
       },
       {
+        userId: demoUser.id,
         author: "Oficina do Zé",
         vehicleDesc: "Toyota Corolla 1.8 2018",
         symptom: "Ruído metálico ao virar o volante",
@@ -383,6 +425,7 @@ async function main() {
   // ===== Quotes =====
   await prisma.quote.create({
     data: {
+      userId: demoUser.id,
       number: "ORC-2024-001",
       customerId: c1.id,
       vehicleId: v1?.id,

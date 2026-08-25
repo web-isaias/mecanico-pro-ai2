@@ -13,6 +13,7 @@ import {
 import { AppSidebar } from "@/components/app-sidebar";
 import { VoiceSearchButton } from "@/components/voice-search";
 import { NotificationsButton } from "@/components/notifications-button";
+import { UserMenu } from "@/components/user-menu";
 import { BrandLogo } from "@/components/shared/brand";
 import {
   Menu,
@@ -122,15 +123,7 @@ export function AppHeader() {
 
           <VoiceSearchButton />
           <NotificationsButton />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-muted-foreground hover:text-orange-400"
-            aria-label="Perfil"
-            onClick={() => navigate("settings")}
-          >
-            <UserCircle className="h-5 w-5" />
-          </Button>
+          <UserMenu />
         </div>
       </div>
 

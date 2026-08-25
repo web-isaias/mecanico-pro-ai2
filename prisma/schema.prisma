@@ -10,9 +10,54 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ===================== USUÁRIOS (CONTAS DE OFICINA) =====================
+model User {
+  id                  String   @id @default(cuid())
+  email               String   @unique
+  name                String
+  workshopName        String?
+  passwordHash        String
+  role                String   @default("owner") // owner, admin, mechanic, receptionist
+  subscriptionStatus  String   @default("trial") // trial, active, past_due, canceled
+  subscriptionId       String?  // Mercado Pago preapproval ID
+  plan                String   @default("monthly") // monthly, annual
+  trialEndsAt         DateTime?
+  currentPeriodEnd    DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  customers           Customer[]
+  appointments        Appointment[]
+  transactions        Transaction[]
+  inventoryItems      InventoryItem[]
+  suppliers           Supplier[]
+  defects             Defect[]
+  quotes              Quote[]
+  serviceOrders       ServiceOrder[]
+  subscriptions       Subscription[]
+}
+
+// Histórico de assinaturas/cobranças
+model Subscription {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mpPreapprovalId String?  // Mercado Pago preapproval ID
+  status          String   // active, canceled, paused, pending, past_due
+  plan            String   // monthly, annual
+  amount          Float
+  currency        String   @default("BRL")
+  currentPeriodEnd DateTime?
+  event           String?  // último evento recebido do webhook
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
 // ===================== CLIENTES =====================
 model Customer {
   id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   name        String
   phone       String?
   whatsapp    String?
@@ -55,6 +100,8 @@ model Vehicle {
 // ===================== ORDEM DE SERVIÇO =====================
 model ServiceOrder {
   id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   customerId  String
   customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
   vehicleId   String?
@@ -89,6 +136,8 @@ model ServiceItem {
 // ===================== ORÇAMENTOS =====================
 model Quote {
   id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   number      String   @unique
   customerId  String
   customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -110,6 +159,8 @@ model Quote {
 // ===================== AGENDA =====================
 model Appointment {
   id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   title       String
   customerId  String?
   customer    Customer? @relation("AppointmentCustomer", fields: [customerId], references: [id], onDelete: SetNull)
@@ -126,6 +177,8 @@ model Appointment {
 // ===================== FINANCEIRO =====================
 model Transaction {
   id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   type        String   // income, expense
   category    String   // service, parts, labor, rent, utility, other
   description String
@@ -139,6 +192,8 @@ model Transaction {
 // ===================== ESTOQUE =====================
 model InventoryItem {
   id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   name        String
   sku         String?
   barcode     String?
@@ -156,6 +211,8 @@ model InventoryItem {
 
 model Supplier {
   id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   name        String
   phone       String?
   email       String?
@@ -169,6 +226,8 @@ model Supplier {
 // ===================== BANCO DE DEFEITOS =====================
 model Defect {
   id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   author      String   @default("Anônimo")
   vehicleDesc String
   symptom     String

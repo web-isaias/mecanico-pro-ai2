@@ -37,15 +37,56 @@ bun install
 
 # 2. Configurar variáveis de ambiente
 cp .env.example .env
-# edite o .env se necessário
+# edite o .env se necessário (NEXTAUTH_SECRET é obrigatório!)
 
 # 3. Criar o banco de dados e popular com dados de exemplo
 bun run db:push      # aplica o schema Prisma
-bun run db:seed      # popula com 4 clientes, 5 veículos, transações, etc.
+bun run db:seed      # popula com user demo + 4 clientes + dados
 
 # 4. Rodar em desenvolvimento
 bun run dev          # http://localhost:3000
 ```
+
+## 🔐 Autenticação & Cobrança (SaaS)
+
+O app implementa um sistema completo de SaaS com:
+
+### Contas de usuário (NextAuth.js)
+- Login por e-mail/senha (bcryptjs)
+- Cada oficina vira uma conta (User no banco)
+- Sessão JWT com `subscriptionStatus` embutido
+- **Credenciais demo**: `demo@mecanicopro.ai` / `demo1234`
+
+### Cobrança recorrente (Mercado Pago)
+- Planos: **Mensal R$ 79,90** ou **Anual R$ 799,00** (2 meses grátis)
+- Pagamento recorrente automático via Mercado Pago Subscriptions API
+- Métodos aceitos: **PIX, cartão de crédito, boleto**
+- Trial gratuito de **7 dias** sem cartão
+
+### Gate de acesso (middleware)
+- `src/middleware.ts` roda antes de toda rota protegida
+- Verifica cookie de sessão (sem DB hit — usa JWT)
+- Redireciona para `/login` se não autenticado
+- Redireciona para `/billing` se trial expirado e assinatura inativa
+- Caminhos públicos: `/login`, `/register`, `/api/auth/*`, `/api/webhooks/*`, `/api/billing/*`
+
+### Sincronização via webhook
+- `POST /api/webhooks/mercadopago` recebe eventos do Mercado Pago
+- Eventos: `preapproval` (autorização), `payment` (cobrança mensal), `cancelled`
+- Atualiza `User.subscriptionStatus` automaticamente
+- Cria log em `Subscription` para auditoria
+
+### Configurar Mercado Pago em produção
+1. Crie conta em [mercadopago.com.br/developers](https://www.mercadopago.com.br/developers)
+2. Crie uma aplicação e copie o **Access Token**
+3. Configure a URL de webhook: `https://seu-dominio.com/api/webhooks/mercadopago`
+4. Adicione no `.env`:
+   ```
+   MERCADOPAGO_ACCESS_TOKEN=APP_USR-xxxxxxxxxxxx
+   MERCADOPAGO_PUBLIC_KEY=APP_USR-xxxxxxxxxxxx
+   NEXT_PUBLIC_MP_CONFIGURED=true
+   ```
+5. **Sem MP configurado**, o modo dev permite ativar a assinatura direto (botão na página /billing)
 
 ## 📦 Deploy
 
