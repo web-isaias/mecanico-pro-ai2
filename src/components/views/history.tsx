@@ -10,10 +10,45 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ViewHeader, SectionCard, EmptyState } from "@/components/shared/view-parts";
-import { History, Search, Wrench, ShieldCheck, CalendarClock, DollarSign, User, Car, Link2, FileText } from "lucide-react";
+import {
+  History,
+  Search,
+  Wrench,
+  ShieldCheck,
+  CalendarClock,
+  DollarSign,
+  User,
+  Car,
+  Link2,
+  FileText,
+  Play,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  Package,
+  TrendingUp,
+  AlertTriangle,
+} from "lucide-react";
+import { toast } from "sonner";
 import { formatCurrency, formatDate } from "@/lib/nav-config";
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
@@ -36,9 +71,13 @@ export function ServiceHistory() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [selected, setSelected] = useState<any | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
 
   useEffect(() => {
     let mounted = true;
+    setLoading(true);
     fetch("/api/services")
       .then((r) => r.json())
       .then((d) => mounted && setOrders(Array.isArray(d) ? d : []))
@@ -47,7 +86,7 @@ export function ServiceHistory() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [refreshKey]);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase();
@@ -61,6 +100,59 @@ export function ServiceHistory() {
       );
     });
   }, [orders, query, status]);
+
+  const refresh = () => setRefreshKey((k) => k + 1);
+
+  // Change the status of the currently-selected OS.
+  // Calls PUT /api/services/[id] which triggers stock decrement + financial transaction on "done".
+  const changeStatus = async (newStatus: "in_progress" | "done" | "cancelled" | "pending") => {
+    if (!selected) return;
+    setUpdatingStatus(newStatus);
+    try {
+      const res = await fetch(`/api/services/${selected.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      // Update the locally selected OS so the UI reflects the new state immediately
+      setSelected(data);
+
+      // Toasts based on side effects returned by the backend
+      const side = data._sideEffects;
+      if (newStatus === "done" && side) {
+        const stockMsg = side.stockAdjusted.length > 0
+          ? side.stockAdjusted
+              .map((s: any) => s.matched
+                ? `${s.name}: -${s.quantity} (${s.remaining} restantes)`
+                : `${s.name}: sem correspondência no estoque`)
+              .join(" • ")
+          : "nenhum item de peça para baixar";
+        const txMsg = side.transactionCreated
+          ? `Transação de ${formatCurrency(side.transactionCreated.amount)} criada`
+          : "";
+        toast.success(`OS marcada como concluída! ${txMsg}`.trim(), {
+          description: `Estoque: ${stockMsg}`,
+          duration: 7000,
+        });
+      } else if (newStatus === "in_progress") {
+        toast.info("OS em andamento");
+      } else if (newStatus === "cancelled") {
+        toast.warning("OS cancelada");
+      } else if (newStatus === "pending") {
+        toast.info("OS reaberta como pendente");
+      }
+
+      refresh();
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao atualizar status");
+    } finally {
+      setUpdatingStatus(null);
+      setConfirmCancel(false);
+    }
+  };
 
   return (
     <div>
@@ -185,7 +277,7 @@ export function ServiceHistory() {
                 {selected.description && (
                   <div className="rounded-lg border border-border bg-background/40 p-3">
                     <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Descrição</p>
-                    <p className="mt-1 text-sm text-foreground">{selected.description}</p>
+                    <p className="mt-1 whitespace-pre-line text-sm text-foreground">{selected.description}</p>
                   </div>
                 )}
                 <div className="grid grid-cols-2 gap-3 text-sm">
@@ -195,6 +287,9 @@ export function ServiceHistory() {
                   <InfoRow icon={<ShieldCheck className="h-3.5 w-3.5" />} label="Garantia" value={selected.warranty || "-"} />
                   <InfoRow icon={<DollarSign className="h-3.5 w-3.5" />} label="Mão de obra" value={formatCurrency(selected.laborCost)} />
                   <InfoRow icon={<DollarSign className="h-3.5 w-3.5" />} label="Peças" value={formatCurrency(selected.partsCost)} />
+                  {selected.completedAt && (
+                    <InfoRow icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="Concluído em" value={formatDate(selected.completedAt)} />
+                  )}
                 </div>
                 {selected.items?.length > 0 && (
                   <div>
@@ -202,7 +297,12 @@ export function ServiceHistory() {
                     <div className="space-y-1.5">
                       {selected.items.map((it: any) => (
                         <div key={it.id} className="flex items-center justify-between rounded-lg border border-border bg-background/40 p-2 text-xs">
-                          <span className="text-foreground">{it.description}</span>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-foreground">{it.description}</p>
+                            <p className="text-[10px] text-muted-foreground">
+                              {it.quantity}x {formatCurrency(it.unitPrice)} • {it.type === "part" ? "Peça" : "Serviço"}
+                            </p>
+                          </div>
                           <span className="font-semibold text-foreground">{formatCurrency(it.total)}</span>
                         </div>
                       ))}
@@ -215,11 +315,128 @@ export function ServiceHistory() {
                     <span className="text-xl font-bold text-orange-400">{formatCurrency(selected.totalCost)}</span>
                   </div>
                 </div>
+
+                {/* Workflow actions */}
+                <div className="rounded-xl border border-border bg-card/40 p-3">
+                  <p className="mb-3 text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Fluxo de execução
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {/* pending → in_progress */}
+                    {selected.status === "pending" && (
+                      <Button
+                        size="sm"
+                        className="gradient-orange text-primary-foreground glow-orange"
+                        disabled={updatingStatus !== null}
+                        onClick={() => changeStatus("in_progress")}
+                      >
+                        {updatingStatus === "in_progress" ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Play className="h-3.5 w-3.5" />
+                        )}
+                        Iniciar serviço
+                      </Button>
+                    )}
+
+                    {/* in_progress → done */}
+                    {selected.status === "in_progress" && (
+                      <Button
+                        size="sm"
+                        className="bg-emerald-600 text-white hover:bg-emerald-700"
+                        disabled={updatingStatus !== null}
+                        onClick={() => changeStatus("done")}
+                      >
+                        {updatingStatus === "done" ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                        )}
+                        Concluir serviço
+                      </Button>
+                    )}
+
+                    {/* done → reopen */}
+                    {selected.status === "done" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+                        disabled={updatingStatus !== null}
+                        onClick={() => changeStatus("pending")}
+                      >
+                        {updatingStatus === "pending" ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <History className="h-3.5 w-3.5" />
+                        )}
+                        Reabrir
+                      </Button>
+                    )}
+
+                    {/* cancel (anytime, except already cancelled) */}
+                    {selected.status !== "cancelled" && selected.status !== "done" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-red-500/40 text-red-400 hover:bg-red-500/10"
+                        disabled={updatingStatus !== null}
+                        onClick={() => setConfirmCancel(true)}
+                      >
+                        <XCircle className="h-3.5 w-3.5" />
+                        Cancelar
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* Info about side effects */}
+                  {selected.status === "in_progress" && (
+                    <p className="mt-2.5 flex items-start gap-1.5 text-[10px] text-muted-foreground">
+                      <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-400" />
+                      Ao concluir: baixa automática de estoque (peças) + transação financeira de
+                      <span className="font-semibold text-foreground"> {formatCurrency(selected.totalCost)}</span>.
+                    </p>
+                  )}
+                  {selected.status === "done" && (
+                    <p className="mt-2.5 flex items-start gap-1.5 text-[10px] text-emerald-300">
+                      <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0" />
+                      Serviço concluído — estoque e financeiro já foram atualizados automaticamente.
+                    </p>
+                  )}
+                  {selected.status === "cancelled" && (
+                    <p className="mt-2.5 flex items-start gap-1.5 text-[10px] text-red-300">
+                      <XCircle className="mt-0.5 h-3 w-3 shrink-0" />
+                      OS cancelada. Estoque e financeiro não foram afetados.
+                    </p>
+                  )}
+                </div>
               </div>
             </>
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Confirm cancel */}
+      <AlertDialog open={confirmCancel} onOpenChange={setConfirmCancel}>
+        <AlertDialogContent className="border-border bg-popover">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-foreground">Cancelar esta ordem de serviço?</AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground">
+              A OS será marcada como cancelada. Estoque e financeiro não serão afetados.
+              Você poderá reabri-la depois se necessário.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-border">Voltar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 text-white hover:bg-red-700"
+              onClick={() => changeStatus("cancelled")}
+            >
+              Sim, cancelar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
