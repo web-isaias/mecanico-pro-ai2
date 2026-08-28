@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
         customer: true,
         vehicle: true,
         items: true,
+        quote: true,
       },
       take: 100,
     });

@@ -23,8 +23,11 @@ import {
   PenLine,
   RotateCcw,
   Check,
+  CheckCircle2,
   Loader2,
   Printer,
+  Wrench,
+  Link2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
@@ -72,6 +75,44 @@ export function Quotes() {
       .then((d) => Array.isArray(d) ? setSavedQuotes(d) : setSavedQuotes([]))
       .catch(() => {})
       .finally(() => setLoadingList(false));
+  };
+
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+
+  // Approve a saved quote — calls PUT /api/quotes/[id] with status: "approved".
+  // The backend creates a ServiceOrder linked to this quote (idempotent — safe to call again).
+  const approveQuote = async (quoteId: string, quoteNumber: string) => {
+    setApprovingId(quoteId);
+    try {
+      const res = await fetch(`/api/quotes/${quoteId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "approved" }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      // The backend returns _serviceOrder info
+      const so = data._serviceOrder;
+      if (so?.created) {
+        toast.success(
+          `Orçamento ${quoteNumber} aprovado! OS ${so.serviceOrderNumber} criada automaticamente.`,
+          { duration: 6000 }
+        );
+      } else if (so && !so.created) {
+        toast.info(
+          `Orçamento ${quoteNumber} aprovado. OS ${so.serviceOrderNumber} já existia.`,
+          { duration: 5000 }
+        );
+      } else {
+        toast.success(`Orçamento ${quoteNumber} aprovado!`);
+      }
+      refreshQuotes();
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao aprovar orçamento");
+    } finally {
+      setApprovingId(null);
+    }
   };
 
   const laborTotal = items
@@ -434,49 +475,89 @@ export function Quotes() {
                   description="Salve um orçamento para vê-lo aqui."
                 />
               ) : (
-                savedQuotes.map((q) => (
-                  <motion.div
-                    key={q.id}
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="rounded-xl border border-border bg-background/40 p-3"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-mono text-xs font-bold text-orange-400">{q.number}</p>
-                        <p className="truncate text-sm font-medium text-foreground">
-                          {q.customer?.name}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground">
-                          {formatDate(q.createdAt)}
-                        </p>
+                savedQuotes.map((q) => {
+                  const hasServiceOrder = Array.isArray(q.serviceOrders) && q.serviceOrders.length > 0;
+                  const isApproved = q.status === "approved";
+                  const isApproving = approvingId === q.id;
+                  return (
+                    <motion.div
+                      key={q.id}
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="rounded-xl border border-border bg-background/40 p-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-mono text-xs font-bold text-orange-400">{q.number}</p>
+                          <p className="truncate text-sm font-medium text-foreground">
+                            {q.customer?.name}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {formatDate(q.createdAt)}
+                          </p>
+                        </div>
+                        <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-semibold ${
+                          q.status === "draft" ? "bg-zinc-500/15 text-zinc-300" :
+                          q.status === "sent" ? "bg-blue-500/15 text-blue-300" :
+                          q.status === "approved" ? "bg-emerald-500/15 text-emerald-300" :
+                          "bg-red-500/15 text-red-300"
+                        }`}>
+                          {q.status === "draft" ? "Rascunho" :
+                           q.status === "sent" ? "Enviado" :
+                           q.status === "approved" ? "Aprovado" : "Rejeitado"}
+                        </span>
                       </div>
-                      <span className={`rounded px-2 py-0.5 text-[10px] font-semibold ${
-                        q.status === "draft" ? "bg-zinc-500/15 text-zinc-300" :
-                        q.status === "sent" ? "bg-blue-500/15 text-blue-300" :
-                        q.status === "approved" ? "bg-emerald-500/15 text-emerald-300" :
-                        "bg-red-500/15 text-red-300"
-                      }`}>
-                        {q.status === "draft" ? "Rascunho" :
-                         q.status === "sent" ? "Enviado" :
-                         q.status === "approved" ? "Aprovado" : "Rejeitado"}
-                      </span>
-                    </div>
-                    <div className="mt-2 flex items-center justify-between">
-                      <span className="text-base font-bold text-foreground">
-                        {formatCurrency(q.total)}
-                      </span>
-                      <div className="flex gap-1">
-                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => generatePDF(q)}>
-                          <Download className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => shareWhatsApp(q)}>
-                          <Share2 className="h-3.5 w-3.5" />
-                        </Button>
+
+                      {/* Badge: OS already generated from this quote */}
+                      {hasServiceOrder && (
+                        <div className="mt-2 inline-flex items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-300">
+                          <Link2 className="h-3 w-3" />
+                          OS gerada
+                          <Wrench className="ml-0.5 h-3 w-3" />
+                        </div>
+                      )}
+
+                      <div className="mt-2 flex items-center justify-between">
+                        <span className="text-base font-bold text-foreground">
+                          {formatCurrency(q.total)}
+                        </span>
+                        <div className="flex gap-1">
+                          {/* Aprovar — só aparece se ainda não aprovado */}
+                          {!isApproved && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 gap-1 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+                              disabled={isApproving}
+                              onClick={() => approveQuote(q.id, q.number)}
+                              title="Aprovar e gerar Ordem de Serviço"
+                            >
+                              {isApproving ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="h-3 w-3" />
+                              )}
+                              Aprovar
+                            </Button>
+                          )}
+                          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => generatePDF(q)}>
+                            <Download className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => shareWhatsApp(q)}>
+                            <Share2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                  </motion.div>
-                ))
+
+                      {/* Aprovado: mostrar mensagem informativa */}
+                      {isApproved && hasServiceOrder && (
+                        <p className="mt-1.5 text-[10px] text-blue-300">
+                          ✓ Ordem de serviço vinculada — edição não cria nova OS.
+                        </p>
+                      )}
+                    </motion.div>
+                  );
+                })
               )}
             </div>
           </ScrollArea>

@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ViewHeader, SectionCard, EmptyState } from "@/components/shared/view-parts";
-import { History, Search, Wrench, ShieldCheck, CalendarClock, DollarSign, User, Car } from "lucide-react";
+import { History, Search, Wrench, ShieldCheck, CalendarClock, DollarSign, User, Car, Link2, FileText } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/nav-config";
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
@@ -128,6 +128,13 @@ export function ServiceHistory() {
                     <p className="truncate text-xs text-muted-foreground">
                       {o.customer?.name} {o.vehicle ? `• ${o.vehicle.brand} ${o.vehicle.model}` : ""}
                     </p>
+                    {/* Badge: origem do orçamento */}
+                    {o.quote && (
+                      <span className="mt-1 inline-flex items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-blue-300">
+                        <Link2 className="h-2.5 w-2.5" />
+                        Orçamento {o.quote.number}
+                      </span>
+                    )}
                   </div>
                   <div className="text-right">
                     <p className="text-sm font-bold text-foreground">{formatCurrency(o.totalCost)}</p>
@@ -158,6 +165,23 @@ export function ServiceHistory() {
                 <Badge variant="outline" className={STATUS_MAP[selected.status]?.color}>
                   {STATUS_MAP[selected.status]?.label}
                 </Badge>
+
+                {/* Origem: orçamento vinculado */}
+                {selected.quote && (
+                  <div className="flex items-center gap-3 rounded-lg border border-blue-500/30 bg-blue-500/5 p-3">
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-blue-500/15 text-blue-300">
+                      <FileText className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Originado do orçamento</p>
+                      <p className="truncate font-mono text-sm font-bold text-blue-300">
+                        {selected.quote.number}
+                      </p>
+                    </div>
+                    <Link2 className="h-4 w-4 shrink-0 text-blue-400" />
+                  </div>
+                )}
+
                 {selected.description && (
                   <div className="rounded-lg border border-border bg-background/40 p-3">
                     <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Descrição</p>

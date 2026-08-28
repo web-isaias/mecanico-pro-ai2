@@ -13,7 +13,11 @@ export async function GET(req: NextRequest) {
     const quotes = await db.quote.findMany({
       where,
       orderBy: { createdAt: "desc" },
-      include: { customer: true, vehicle: true },
+      include: {
+        customer: true,
+        vehicle: true,
+        serviceOrders: { select: { id: true, status: true, createdAt: true } },
+      },
       take: 100,
     });
     return NextResponse.json(quotes);

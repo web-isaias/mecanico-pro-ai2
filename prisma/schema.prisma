@@ -106,6 +106,9 @@ model ServiceOrder {
   customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
   vehicleId   String?
   vehicle     Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  // Vínculo opcional com o orçamento de origem (passo 1 do fluxo de OS)
+  quoteId     String?  @unique
+  quote       Quote?   @relation(fields: [quoteId], references: [id], onDelete: SetNull)
   title       String
   description String?
   status      String   @default("pending") // pending, in_progress, done, cancelled
@@ -154,6 +157,9 @@ model Quote {
   signature   String? // digital signature data URL
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  // Ordens de serviço geradas a partir deste orçamento (1:1 pelo quoteId @unique)
+  serviceOrders ServiceOrder[]
 }
 
 // ===================== AGENDA =====================
