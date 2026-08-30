@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { getAuthUserId } from "@/lib/auth-helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,6 +10,11 @@ const VALID_DIFFICULTIES = new Set(["easy", "medium", "hard"]);
 // GET /api/defects?q=...&difficulty=...&sort=...&take=...&skip=...
 export async function GET(req: NextRequest) {
   try {
+    const userId = await getAuthUserId(req);
+    if (!userId) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
     const { searchParams } = new URL(req.url);
     const q = searchParams.get("q")?.trim() ?? "";
     const difficulty = searchParams.get("difficulty")?.trim() ?? "";
@@ -16,20 +22,28 @@ export async function GET(req: NextRequest) {
     const take = Number(searchParams.get("take") ?? 100);
     const skip = Number(searchParams.get("skip") ?? 0);
 
-    const where: any = {};
+    // Show defects owned by this user OR public (userId = null, e.g. seed data)
+    // AND apply optional search/difficulty filters
+    const where: any = {
+      AND: [
+        { OR: [{ userId }, { userId: null }] },
+      ],
+    };
 
     if (q) {
-      where.OR = [
-        { vehicleDesc: { contains: q } },
-        { symptom: { contains: q } },
-        { diagnosis: { contains: q } },
-        { solution: { contains: q } },
-        { author: { contains: q } },
-      ];
+      where.AND.push({
+        OR: [
+          { vehicleDesc: { contains: q } },
+          { symptom: { contains: q } },
+          { diagnosis: { contains: q } },
+          { solution: { contains: q } },
+          { author: { contains: q } },
+        ],
+      });
     }
 
     if (difficulty && VALID_DIFFICULTIES.has(difficulty)) {
-      where.difficulty = difficulty;
+      where.AND.push({ difficulty });
     }
 
     const orderBy =
@@ -60,6 +74,11 @@ export async function GET(req: NextRequest) {
 // POST /api/defects — create collaborative defect entry
 export async function POST(req: NextRequest) {
   try {
+    const userId = await getAuthUserId(req);
+    if (!userId) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
     const body = await req.json();
     const {
       author,
@@ -131,6 +150,7 @@ export async function POST(req: NextRequest) {
 
     const defect = await db.defect.create({
       data: {
+        userId,
         author: finalAuthor,
         vehicleDesc: vehicleDesc.trim(),
         symptom: symptom.trim(),

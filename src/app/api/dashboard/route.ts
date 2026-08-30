@@ -1,17 +1,27 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { getToken } from "next-auth/jwt";
 import { db } from "@/lib/db";
-import { formatCurrency } from "@/lib/nav-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    // ── Auth: identify the logged-in workshop owner ─────────────────────
+    // Without this filter, every account saw the same shared data.
+    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
+    if (!token?.id) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+    const userId = token.id as string;
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
+    // ── All queries are scoped to the current user ──────────────────────
+    // Each model has a userId field linking it to the workshop owner.
     const [
       customers,
       appointmentsToday,
@@ -24,39 +34,45 @@ export async function GET() {
       notifications,
     ] = await Promise.all([
       db.customer.findMany({
+        where: { userId },
         orderBy: { createdAt: "desc" },
         take: 5,
         include: { vehicles: true },
       }),
       db.appointment.findMany({
         where: {
+          userId,
           startDate: { gte: today, lt: tomorrow },
         },
         orderBy: { startDate: "asc" },
       }),
       db.appointment.findMany({
         where: {
+          userId,
           startDate: { gte: tomorrow },
         },
         orderBy: { startDate: "asc" },
         take: 5,
       }),
       db.serviceOrder.findMany({
+        where: { userId },
         orderBy: { createdAt: "desc" },
         take: 5,
         include: { customer: true, vehicle: true },
       }),
-      db.inventoryItem.findMany(),
+      db.inventoryItem.findMany({ where: { userId } }),
       db.transaction.findMany({
+        where: { userId },
         orderBy: { date: "desc" },
         take: 100,
       }),
-      db.quote.findMany({ orderBy: { createdAt: "desc" }, take: 20 }),
-      db.defect.findMany({ orderBy: { createdAt: "desc" }, take: 5 }),
+      db.quote.findMany({ where: { userId }, orderBy: { createdAt: "desc" }, take: 20 }),
+      db.defect.findMany({ where: { userId }, orderBy: { createdAt: "desc" }, take: 5 }),
+      // Notifications are global (system-wide), not per-user — keep as-is
       db.notification.findMany({ orderBy: { createdAt: "desc" }, take: 10 }),
     ]);
 
-    // Financial calculations
+    // ── Financial calculations (scoped to user's transactions) ──────────
     const todayTransactions = transactions.filter(
       (t) => new Date(t.date) >= today && new Date(t.date) < tomorrow
     );
@@ -78,7 +94,7 @@ export async function GET() {
       .filter((t) => t.type === "expense")
       .reduce((s, t) => s + t.amount, 0);
 
-    // Build chart data (last 7 days)
+    // ── Build chart data (last 7 days, scoped) ──────────────────────────
     const chartData: { day: string; receita: number; despesa: number }[] = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date(today);
@@ -98,7 +114,7 @@ export async function GET() {
       });
     }
 
-    // Low stock alerts
+    // ── Low stock alerts (scoped) ───────────────────────────────────────
     const lowStockItems = inventoryItems.filter((i) => i.quantity <= i.minStock);
 
     return NextResponse.json({
@@ -109,9 +125,11 @@ export async function GET() {
         monthRevenue,
         monthExpenses,
         monthProfit: monthRevenue - monthExpenses,
-        customerCount: await db.customer.count(),
-        vehicleCount: await db.vehicle.count(),
-        serviceOrderCount: await db.serviceOrder.count(),
+        customerCount: await db.customer.count({ where: { userId } }),
+        vehicleCount: await db.vehicle.count({
+          where: { customer: { userId } },
+        }),
+        serviceOrderCount: await db.serviceOrder.count({ where: { userId } }),
         pendingQuotes: quotes.filter((q) => q.status === "draft" || q.status === "sent").length,
         lowStockCount: lowStockItems.length,
         pendingAppointments: upcomingAppointments.length,
@@ -134,5 +152,3 @@ export async function GET() {
     );
   }
 }
-
-export { formatCurrency };

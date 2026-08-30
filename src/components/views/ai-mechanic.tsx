@@ -46,12 +46,58 @@ export function AiMechanic() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: next }),
       });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      const data = await res.json().catch(() => ({}));
+
+      // ── Defensive: handle API error responses ────────────────────────
+      if (!res.ok || data.error) {
+        const errorMsg =
+          data.error ||
+          (res.status === 429
+            ? "Limite de requisições atingido. Aguarde alguns segundos."
+            : res.status === 502
+            ? "Serviço de IA temporariamente indisponível. Tente novamente."
+            : "Não foi possível falar com a IA agora. Tente novamente.");
+        // Show the error as an assistant message so the user sees context,
+        // plus a toast for quick feedback
+        setMessages([
+          ...next,
+          {
+            role: "assistant",
+            content: `⚠️ **Erro:** ${errorMsg}\n\nTente reformular sua pergunta ou aguarde alguns instantes.`,
+          },
+        ]);
+        toast.error(errorMsg);
+        return;
+      }
+
+      // ── Success — but verify content exists ──────────────────────────
+      if (!data.content || typeof data.content !== "string") {
+        setMessages([
+          ...next,
+          {
+            role: "assistant",
+            content:
+              "⚠️ A IA retornou uma resposta vazia. Tente reformular sua pergunta.",
+          },
+        ]);
+        return;
+      }
+
       setMessages([...next, { role: "assistant", content: data.content }]);
     } catch (err: any) {
-      toast.error(err?.message || "Erro ao consultar a IA");
-      setMessages((m) => m.slice(0, -1));
+      // Network-level error (fetch itself threw)
+      const errorMsg =
+        err?.name === "TypeError"
+          ? "Falha de conexão. Verifique sua internet e tente novamente."
+          : "Erro inesperado ao consultar a IA. Tente novamente.";
+      setMessages([
+        ...next,
+        {
+          role: "assistant",
+          content: `⚠️ **Erro:** ${errorMsg}`,
+        },
+      ]);
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
     }

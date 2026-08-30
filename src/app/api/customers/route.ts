@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { getAuthUserId } from "@/lib/auth-helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,22 +8,31 @@ export const dynamic = "force-dynamic";
 // GET /api/customers?q=...&take=...&skip=...
 export async function GET(req: NextRequest) {
   try {
+    const userId = await getAuthUserId(req);
+    if (!userId) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
     const { searchParams } = new URL(req.url);
     const q = searchParams.get("q")?.trim() ?? "";
     const take = Number(searchParams.get("take") ?? 100);
     const skip = Number(searchParams.get("skip") ?? 0);
 
-    const where = q
-      ? {
-          OR: [
-            { name: { contains: q } },
-            { email: { contains: q } },
-            { document: { contains: q } },
-            { phone: { contains: q } },
-            { whatsapp: { contains: q } },
-          ],
-        }
-      : {};
+    // Always filter by the logged-in user (workshop isolation)
+    const where = {
+      userId,
+      ...(q
+        ? {
+            OR: [
+              { name: { contains: q } },
+              { email: { contains: q } },
+              { document: { contains: q } },
+              { phone: { contains: q } },
+              { whatsapp: { contains: q } },
+            ],
+          }
+        : {}),
+    };
 
     const [customers, total] = await Promise.all([
       db.customer.findMany({
@@ -59,6 +69,11 @@ export async function GET(req: NextRequest) {
 // POST /api/customers — create customer with optional nested vehicles
 export async function POST(req: NextRequest) {
   try {
+    const userId = await getAuthUserId(req);
+    if (!userId) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
     const body = await req.json();
     const {
       name,
@@ -78,10 +93,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Optional: prevent duplicate by document when provided
+    // Optional: prevent duplicate by document when provided (scoped to this user)
     if (document && document.trim()) {
       const exists = await db.customer.findFirst({
-        where: { document: document.trim() },
+        where: { document: document.trim(), userId },
       });
       if (exists) {
         return NextResponse.json(
@@ -93,6 +108,7 @@ export async function POST(req: NextRequest) {
 
     const customer = await db.customer.create({
       data: {
+        userId,
         name: name.trim(),
         phone: phone?.trim() || null,
         whatsapp: whatsapp?.trim() || null,

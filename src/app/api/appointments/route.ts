@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { getAuthUserId } from "@/lib/auth-helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,13 +10,18 @@ export const dynamic = "force-dynamic";
 // Customer is included so the UI can display names + contact info.
 export async function GET(req: NextRequest) {
   try {
+    const userId = await getAuthUserId(req);
+    if (!userId) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
     const { searchParams } = new URL(req.url);
     const from = searchParams.get("from");
     const to = searchParams.get("to");
     const status = searchParams.get("status")?.trim();
     const type = searchParams.get("type")?.trim();
 
-    const where: any = {};
+    const where: any = { userId };
 
     if (from || to) {
       where.startDate = {};
@@ -54,6 +60,11 @@ export async function GET(req: NextRequest) {
 // POST /api/appointments — create new appointment
 export async function POST(req: NextRequest) {
   try {
+    const userId = await getAuthUserId(req);
+    if (!userId) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
     const body = await req.json();
     const {
       title,
@@ -105,10 +116,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Validate customer if provided
+    // Validate customer if provided (must belong to the same user)
     if (customerId && typeof customerId === "string" && customerId.trim()) {
-      const customer = await db.customer.findUnique({
-        where: { id: customerId },
+      const customer = await db.customer.findFirst({
+        where: { id: customerId, userId },
       });
       if (!customer) {
         return NextResponse.json(
@@ -125,6 +136,7 @@ export async function POST(req: NextRequest) {
 
     const appointment = await db.appointment.create({
       data: {
+        userId,
         title: title.trim(),
         type: finalType,
         status: finalStatus,

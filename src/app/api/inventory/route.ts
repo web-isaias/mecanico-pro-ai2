@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { getAuthUserId } from "@/lib/auth-helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,6 +10,11 @@ const VALID_CATEGORIES = ["parts", "tools", "fluids"];
 // GET /api/inventory?q=...&category=...&lowStock=true
 export async function GET(req: NextRequest) {
   try {
+    const userId = await getAuthUserId(req);
+    if (!userId) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
     const { searchParams } = new URL(req.url);
     const q = searchParams.get("q")?.trim() ?? "";
     const category = searchParams.get("category")?.trim() ?? "";
@@ -16,7 +22,7 @@ export async function GET(req: NextRequest) {
     const take = Number(searchParams.get("take") ?? 500);
     const skip = Number(searchParams.get("skip") ?? 0);
 
-    const where: any = {};
+    const where: any = { userId };
     if (q) {
       where.OR = [
         { name: { contains: q } },
@@ -53,6 +59,11 @@ export async function GET(req: NextRequest) {
 // POST /api/inventory — create a new inventory item
 export async function POST(req: NextRequest) {
   try {
+    const userId = await getAuthUserId(req);
+    if (!userId) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
     const body = await req.json();
     const {
       name,
@@ -89,6 +100,7 @@ export async function POST(req: NextRequest) {
 
     const item = await db.inventoryItem.create({
       data: {
+        userId,
         name: name.trim(),
         sku: sku?.trim() || null,
         barcode: barcode?.trim() || null,

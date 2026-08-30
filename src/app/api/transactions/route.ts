@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { getAuthUserId } from "@/lib/auth-helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,6 +19,11 @@ const ALLOWED_STATUSES = ["paid", "pending"] as const;
 // GET /api/transactions?type=&category=&status=&from=&to=&q=&take=&skip=
 export async function GET(req: NextRequest) {
   try {
+    const userId = await getAuthUserId(req);
+    if (!userId) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
     const { searchParams } = new URL(req.url);
     const type = searchParams.get("type")?.trim();
     const category = searchParams.get("category")?.trim();
@@ -28,7 +34,7 @@ export async function GET(req: NextRequest) {
     const takeRaw = Number(searchParams.get("take") ?? 500);
     const skipRaw = Number(searchParams.get("skip") ?? 0);
 
-    const where: any = {};
+    const where: any = { userId };
 
     if (type && (ALLOWED_TYPES as readonly string[]).includes(type)) {
       where.type = type;
@@ -87,6 +93,11 @@ export async function GET(req: NextRequest) {
 // POST /api/transactions — create
 export async function POST(req: NextRequest) {
   try {
+    const userId = await getAuthUserId(req);
+    if (!userId) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
     const body = await req.json();
     const {
       type,
@@ -148,6 +159,7 @@ export async function POST(req: NextRequest) {
 
     const transaction = await db.transaction.create({
       data: {
+        userId,
         type,
         category,
         description: description.trim(),

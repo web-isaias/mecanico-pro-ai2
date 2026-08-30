@@ -1,5 +1,7 @@
 "use client";
 import { useState } from "react";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,10 +30,50 @@ import {
   LogOut,
   KeyRound,
   Lock,
+  CalendarClock,
+  Crown,
+  Sparkles,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 
+// Map internal subscription status → user-friendly label + tone
+const SUBSCRIPTION_DISPLAY: Record<
+  string,
+  { label: string; tone: "trial" | "active" | "warning" | "canceled"; description: string }
+> = {
+  trial: {
+    label: "Período de teste",
+    tone: "trial",
+    description: "Teste grátis — sem cobrança",
+  },
+  active: {
+    label: "Ativo",
+    tone: "active",
+    description: "Assinatura paga em dia",
+  },
+  past_due: {
+    label: "Pagamento pendente",
+    tone: "warning",
+    description: "Houve falha na última cobrança",
+  },
+  canceled: {
+    label: "Cancelado",
+    tone: "canceled",
+    description: "Assinatura cancelada",
+  },
+};
+
+const TONE_STYLES: Record<string, string> = {
+  trial: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+  active: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+  warning: "border-red-500/40 bg-red-500/10 text-red-300",
+  canceled: "border-zinc-500/40 bg-zinc-500/10 text-zinc-300",
+};
+
 export function Settings() {
+  const { data: session } = useSession();
+  const router = useRouter();
   const [notifications, setNotifications] = useState({
     review: true,
     oil: true,
@@ -91,19 +133,7 @@ export function Settings() {
             </SectionCard>
 
             <SectionCard title="Plano atual" icon={<KeyRound className="h-4 w-4" />}>
-              <div className="rounded-xl gradient-navy p-4 text-center">
-                <BrandLogo size={40} className="mx-auto" />
-                <p className="mt-2 text-sm font-semibold text-foreground">Plano Premium</p>
-                <p className="text-xs text-muted-foreground">Renovação automática</p>
-                <p className="mt-2 text-2xl font-bold text-gradient-orange">R$ 79,90<span className="text-xs text-muted-foreground">/mês</span></p>
-              </div>
-              <ul className="mt-3 space-y-1.5 text-xs">
-                {["IA ilimitada", "Catálogo completo", "Scanner OBD2", "Multiusuário (5)", "Suporte prioritário"].map((f) => (
-                  <li key={f} className="flex items-center gap-2 text-muted-foreground">
-                    <span className="h-1.5 w-1.5 rounded-full bg-orange-400" /> {f}
-                  </li>
-                ))}
-              </ul>
+              <SubscriptionCard session={session} onUpgrade={() => router.push("/billing")} />
             </SectionCard>
           </div>
         </TabsContent>
@@ -293,6 +323,151 @@ function LoginOption({ name, connected }: { name: string; connected: boolean }) 
       ) : (
         <Button size="sm" variant="outline" className="border-border">Conectar</Button>
       )}
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// SubscriptionCard — reads the REAL subscription status from the session.
+// Replaces the previous hardcoded "Plano Premium / R$ 79,90 / Renovação automática"
+// that lied to trial users by showing "paid/active" status.
+// ────────────────────────────────────────────────────────────────────────────
+function SubscriptionCard({
+  session,
+  onUpgrade,
+}: {
+  session: any;
+  onUpgrade: () => void;
+}) {
+  const user = session?.user as any;
+  const status: string = user?.subscriptionStatus || "trial";
+  const plan: string = user?.plan || "monthly";
+  const trialEndsAt = user?.trialEndsAt ? new Date(user.trialEndsAt as number) : null;
+  const currentPeriodEnd = user?.currentPeriodEnd
+    ? new Date(user.currentPeriodEnd as number)
+    : null;
+
+  const display = SUBSCRIPTION_DISPLAY[status] || SUBSCRIPTION_DISPLAY.trial;
+  const toneStyle = TONE_STYLES[display.tone];
+
+  const now = new Date();
+  const trialDaysLeft = trialEndsAt
+    ? Math.max(0, Math.ceil((trialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
+    : 0;
+  const periodDaysLeft = currentPeriodEnd
+    ? Math.max(0, Math.ceil((currentPeriodEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
+    : 0;
+
+  const planLabel = plan === "annual" ? "Anual" : "Mensal";
+  const planPrice = plan === "annual" ? "R$ 799,00/ano" : "R$ 79,90/mês";
+
+  return (
+    <div className="space-y-3">
+      {/* Status badge */}
+      <div className={`rounded-xl border p-4 ${toneStyle}`}>
+        <div className="flex items-start gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-card/40">
+            {display.tone === "active" ? (
+              <Crown className="h-4 w-4" />
+            ) : display.tone === "trial" ? (
+              <Sparkles className="h-4 w-4" />
+            ) : display.tone === "warning" ? (
+              <AlertTriangle className="h-4 w-4" />
+            ) : (
+              <KeyRound className="h-4 w-4" />
+            )}
+          </span>
+          <div className="flex-1">
+            <p className="text-sm font-bold">{display.label}</p>
+            <p className="text-xs opacity-80">{display.description}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Plan + period info (only meaningful when there's an actual subscription) */}
+      {status === "active" && (
+        <div className="rounded-xl border border-border bg-background/40 p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                Plano
+              </p>
+              <p className="text-sm font-semibold text-foreground">
+                {planLabel} <span className="text-muted-foreground">• {planPrice}</span>
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                Renova em
+              </p>
+              <p className="flex items-center gap-1 text-sm font-semibold text-foreground">
+                <CalendarClock className="h-3.5 w-3.5 text-orange-400" />
+                {periodDaysLeft} dias
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Trial countdown — only shown during trial */}
+      {status === "trial" && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-amber-400">
+                Teste grátis expira em
+              </p>
+              <p className="flex items-center gap-1 text-lg font-bold text-foreground">
+                <CalendarClock className="h-4 w-4 text-amber-400" />
+                {trialDaysLeft} {trialDaysLeft === 1 ? "dia" : "dias"}
+              </p>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              {trialEndsAt?.toLocaleDateString("pt-BR")}
+            </p>
+          </div>
+          <Button
+            size="sm"
+            className="mt-3 w-full gradient-orange text-primary-foreground glow-orange"
+            onClick={onUpgrade}
+          >
+            <Crown className="h-3.5 w-3.5" /> Assinar agora
+          </Button>
+        </div>
+      )}
+
+      {/* Warning for past_due */}
+      {status === "past_due" && (
+        <div className="rounded-xl border border-red-500/40 bg-red-500/5 p-3 text-xs text-red-300">
+          <p className="flex items-center gap-1.5">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            Atualize seu pagamento para evitar o bloqueio do acesso.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-2 w-full border-red-500/40 text-red-300 hover:bg-red-500/10"
+            onClick={onUpgrade}
+          >
+            Regularizar pagamento
+          </Button>
+        </div>
+      )}
+
+      {/* Feature list */}
+      <ul className="space-y-1.5 text-xs">
+        {[
+          "IA ilimitada",
+          "Catálogo técnico completo",
+          "Scanner OBD2 + banco de códigos",
+          "Gestão completa da oficina",
+          "Suporte por e-mail",
+        ].map((f) => (
+          <li key={f} className="flex items-center gap-2 text-muted-foreground">
+            <span className="h-1.5 w-1.5 rounded-full bg-orange-400" /> {f}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

@@ -1,14 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { getAuthUserId } from "@/lib/auth-helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
+    const userId = await getAuthUserId(req);
+    if (!userId) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status");
-    const where: any = {};
+    const where: any = { userId };
     if (status) where.status = status;
     const orders = await db.serviceOrder.findMany({
       where,
@@ -33,6 +39,11 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const userId = await getAuthUserId(req);
+    if (!userId) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
     const body = await req.json();
     const { customerId, vehicleId, title, description, status, priority, laborCost, partsCost, totalCost, warranty, scheduledAt, items } = body;
     if (!customerId || !title) {
@@ -41,8 +52,17 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+    // Validate customer belongs to this user
+    const customer = await db.customer.findFirst({ where: { id: customerId, userId } });
+    if (!customer) {
+      return NextResponse.json(
+        { error: "Cliente não encontrado" },
+        { status: 404 }
+      );
+    }
     const order = await db.serviceOrder.create({
       data: {
+        userId,
         customerId,
         vehicleId: vehicleId || null,
         title,
