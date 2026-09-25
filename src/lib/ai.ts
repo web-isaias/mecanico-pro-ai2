@@ -1,13 +1,100 @@
-// Centralized AI service helpers (backend-only)
-import ZAI from "z-ai-web-dev-sdk";
+import dns from "node:dns";
+dns.setDefaultResultOrder("ipv4first");
 
-let _zai: Awaited<ReturnType<typeof ZAI.create>> | null = null;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_MODEL = "gemini-3.6-flash";
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+
+export type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+function createGeminiClient() {
+  return {
+    chat: {
+      completions: {
+        create: async (params: {
+          messages: { role: string; content: string }[];
+          thinking?: { type: string };
+        }) => {
+          if (!GEMINI_API_KEY) {
+            throw new Error("GEMINI_API_KEY não configurada (auth)");
+          }
+
+          const [systemMsg, ...rest] = params.messages;
+          const systemInstruction = systemMsg?.content
+            ? { parts: [{ text: systemMsg.content }] }
+            : undefined;
+
+          const contents = rest.map((m) => ({
+            role: m.role === "assistant" ? "model" : "user",
+            parts: [{ text: m.content }],
+          }));
+
+          const body = JSON.stringify({
+            contents,
+            ...(systemInstruction ? { systemInstruction } : {}),
+          });
+
+          const MAX_RETRIES = 3;
+          const RETRY_DELAY_MS = 1500;
+          let lastError: Error | null = null;
+
+          for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            const res = await fetch(GEMINI_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body,
+            });
+
+            if (res.ok) {
+              const data = await res.json();
+              const text =
+                data?.candidates?.[0]?.content?.parts
+                  ?.map((p: any) => p.text)
+                  .join("") ?? null;
+
+              return {
+                choices: [
+                  {
+                    message: {
+                      content: text,
+                    },
+                  },
+                ],
+              };
+            }
+
+            const errText = await res.text().catch(() => "");
+            const isRetryable = res.status === 503 || res.status === 429;
+            lastError = new Error(`Gemini API error ${res.status}: ${errText}`);
+
+            if (isRetryable && attempt < MAX_RETRIES) {
+              console.warn(
+                `Gemini retornou ${res.status} (tentativa ${attempt}/${MAX_RETRIES}). Tentando novamente em ${RETRY_DELAY_MS}ms...`
+              );
+              await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
+              continue;
+            }
+
+            throw lastError;
+          }
+
+          throw lastError ?? new Error("Falha desconhecida na chamada ao Gemini.");
+        },
+      },
+    },
+  };
+}
+
+let _client: ReturnType<typeof createGeminiClient> | null = null;
 
 export async function getAI() {
-  if (!_zai) {
-    _zai = await ZAI.create();
+  if (!_client) {
+    _client = createGeminiClient();
   }
-  return _zai;
+  return _client;
 }
 
 export const SYSTEM_PROMPTS = {
@@ -79,9 +166,4 @@ Seja técnico e prático. Responda SEMPRE em português do Brasil.`,
 6. **Grau de urgência**: baixa / média / alta / crítica
 
 Responda SEMPRE em português do Brasil, em Markdown. Se a imagem não for relacionada à mecânica automotiva, indique educadamente.`,
-};
-
-export type ChatMessage = {
-  role: "user" | "assistant";
-  content: string;
 };
