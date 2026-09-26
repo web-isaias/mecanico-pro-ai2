@@ -254,7 +254,7 @@ export function Schedule() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // ---- Fetch appointments for the visible month (with 1 week padding) ----
-  const monthStart = startOfMonth(currentMonth);
+  const monthStart = useMemo(() => startOfMonth(currentMonth), [currentMonth]);
   const rangeStart = useMemo(() => {
     const d = new Date(monthStart);
     d.setDate(d.getDate() - 7);
