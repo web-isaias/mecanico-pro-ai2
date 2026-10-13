@@ -685,6 +685,29 @@ export function Schematics() {
     setOpen(true);
   };
 
+  // Navegadores modernos bloqueiam abrir URLs "data:" em nova aba (a página abre em branco).
+  // Converte o SVG para Blob e abre o endereço blob: no lugar.
+  const openInNewTab = async (d: Diagram) => {
+    try {
+      const svgText = decodeURIComponent(d.fileUrl.replace(/^data:image\/svg\+xml;utf8,/, ""));
+      const blob = new Blob([svgText], { type: "image/svg+xml" });
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, "_blank", "noopener");
+      if (!win) {
+        // pop-up bloqueado: cai para o download do arquivo
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `esquema-${d.id}.svg`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      console.error("Erro ao abrir esquema:", err);
+    }
+  };
+
   const downloadDiagram = (d: Diagram, e: React.MouseEvent) => {
     e.stopPropagation();
     // Trigger download of the SVG as a file
@@ -884,9 +907,7 @@ export function Schematics() {
                   variant="outline"
                   size="sm"
                   className="border-border"
-                  onClick={() => {
-                    window.open(selected.fileUrl, "_blank");
-                  }}
+                  onClick={() => openInNewTab(selected)}
                 >
                   <Maximize2 className="h-3.5 w-3.5" /> Abrir em nova aba
                 </Button>

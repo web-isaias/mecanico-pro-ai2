@@ -8,12 +8,10 @@ export const runtime = "nodejs";
 // DEV-ONLY: simulate a successful webhook (Mercado Pago not configured)
 // In production, this endpoint is disabled and the real webhook does the work.
 export async function POST(req: NextRequest) {
-  // Disable in production if MP is configured
-  if (process.env.MERCADOPAGO_ACCESS_TOKEN) {
-    return NextResponse.json(
-      { error: "Disponível apenas sem Mercado Pago configurado" },
-      { status: 403 }
-    );
+  // SEGURANÇA: este endpoint dá assinatura grátis. Nunca pode funcionar em produção
+  // (antes ele só era bloqueado se MERCADOPAGO_ACCESS_TOKEN estivesse definido).
+  if (process.env.NODE_ENV === "production" || process.env.MERCADOPAGO_ACCESS_TOKEN) {
+    return NextResponse.json({ error: "Indisponível" }, { status: 403 });
   }
   try {
     const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });

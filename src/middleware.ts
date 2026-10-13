@@ -61,7 +61,10 @@ export async function middleware(req: NextRequest) {
   const inTrial = status === "trial" && trialEndsAt && now < trialEndsAt;
   const gracePeriod = status === "past_due" && currentPeriodEnd && now < currentPeriodEnd + 3 * 24 * 60 * 60 * 1000;
 
-  const hasAccess = isActive || inTrial || gracePeriod;
+  // assinatura cancelada continua valendo até o fim do período já pago
+  const canceledButPaid = status === "canceled" && currentPeriodEnd && currentPeriodEnd > now;
+
+  const hasAccess = isActive || inTrial || gracePeriod || canceledButPaid;
 
   // 3. No access → redirect to billing (unless already there)
   if (!hasAccess && pathname !== "/billing") {

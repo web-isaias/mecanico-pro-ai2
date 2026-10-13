@@ -57,7 +57,7 @@ export async function createSubscriptionPreference(opts: {
       currency_id: "BRL",
       frequency: plan.interval,
       frequency_type: plan.intervalType,
-      repetition: plan.intervalType === "years" ? 1 : 12, // max repetitions (1 year or 12 months)
+      // sem limite de repetições: a cobrança continua até o cliente cancelar
     },
     payer_email: opts.email,
     back_url: opts.backUrl,
@@ -101,20 +101,36 @@ export async function getPreapproval(preapprovalId: string): Promise<any | null>
   return res.json();
 }
 
-// Map Mercado Pago status → our internal status
-export function mapMpStatus(mpStatus: string): string {
+// Busca um pagamento recorrente (cobrança de uma assinatura) para descobrir a qual assinatura ele pertence
+export async function getAuthorizedPayment(paymentId: string): Promise<any | null> {
+  if (!isConfigured()) return null;
+  const token = getAccessToken();
+  const res = await fetch(`${MP_API}/authorized_payments/${paymentId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    console.error("MP getAuthorizedPayment error:", await res.text());
+    return null;
+  }
+  return res.json();
+}
+
+// Map Mercado Pago status → our internal status.
+// Retorna null quando o status NÃO deve alterar a conta (ex.: "pending" = cliente abriu o
+// checkout mas ainda não pagou; não pode apagar o teste grátis dele).
+export function mapMpStatus(mpStatus: string): string | null {
   switch (mpStatus) {
     case "authorized":
     case "active":
       return "active";
     case "paused":
-    case "pending":
       return "past_due";
     case "cancelled":
     case "canceled":
       return "canceled";
+    case "pending":
     default:
-      return "past_due";
+      return null;
   }
 }
 

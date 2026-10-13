@@ -82,6 +82,25 @@ export default function BillingPage() {
     }
   }, [status, session, router]);
 
+  // Ao voltar do Mercado Pago o webhook pode levar alguns segundos: atualiza a sessão
+  // a cada 4s (até ~1 min) até o acesso ser liberado.
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    const u = session?.user as any;
+    if (u?.subscriptionStatus === "active") return;
+    const voltouDoPagamento =
+      typeof window !== "undefined" && /preapproval_id|collection_status|status=/.test(window.location.search);
+    if (!voltouDoPagamento) return;
+    let tentativas = 0;
+    const timer = setInterval(async () => {
+      tentativas += 1;
+      await update({});
+      if (tentativas >= 15) clearInterval(timer);
+    }, 4000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
+
   if (status === "loading") {
     return (
       <div className="grid h-64 place-items-center">
@@ -105,7 +124,7 @@ export default function BillingPage() {
       }
       if (data.dev) {
         // Dev mode — show toast and use dev-activate endpoint
-        toast.info("Modo dev: ative a assinatura para teste");
+        toast.error("Pagamento indisponível no momento. Tente novamente mais tarde.");
         return;
       }
       // Redirect to Mercado Pago
@@ -151,7 +170,9 @@ export default function BillingPage() {
   const daysLeft = trialEndsAt
     ? Math.ceil((trialEndsAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
     : 0;
-  const isConfigured = process.env.NEXT_PUBLIC_MP_CONFIGURED === "true";
+  // Em produção sempre usa o checkout real (o modo "dev" que ativa de graça nunca roda em produção)
+  const isConfigured =
+    process.env.NODE_ENV === "production" || process.env.NEXT_PUBLIC_MP_CONFIGURED === "true";
 
   return (
     <motion.div

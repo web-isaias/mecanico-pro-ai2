@@ -1,23 +1,50 @@
+import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getPreapproval, mapMpStatus, PLANS, type PlanId } from "@/lib/mercadopago";
+import {
+  getPreapproval,
+  getAuthorizedPayment,
+  mapMpStatus,
+  PLANS,
+  type PlanId,
+} from "@/lib/mercadopago";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-// Mercado Pago webhook receiver
-// MP calls this URL whenever a subscription event happens:
-//   - preapproval authorized (user authorized recurring payment)
-//   - payment received (monthly charge succeeded)
-//   - payment failed (charge failed — set status to past_due)
-//   - subscription cancelled
-// We update the User.subscriptionStatus + create a Subscription log entry.
+// Webhook do Mercado Pago (assinaturas).
+// Eventos tratados:
+//   - subscription_preapproval        → assinatura criada/autorizada/pausada/cancelada
+//   - subscription_authorized_payment → cobrança recorrente (mensal/anual) processada
+// Qualquer outro evento (ex.: "payment") é ignorado.
+//
+// Segurança:
+//   - Se MERCADOPAGO_WEBHOOK_SECRET estiver definido, a assinatura (x-signature) é validada.
+//   - O estado real SEMPRE é consultado na API do Mercado Pago; o corpo do aviso nunca é confiado.
+
+function validSignature(req: NextRequest, dataId: string): boolean {
+  const secret = process.env.MERCADOPAGO_WEBHOOK_SECRET;
+  if (!secret) return true; // validação desligada (não recomendado em produção)
+
+  const sig = req.headers.get("x-signature") ?? "";
+  const requestId = req.headers.get("x-request-id") ?? "";
+  const parts: Record<string, string> = {};
+  for (const piece of sig.split(",")) {
+    const [k, v] = piece.trim().split("=");
+    if (k && v) parts[k] = v;
+  }
+  if (!parts.ts || !parts.v1) return false;
+
+  const manifest = `id:${dataId.toLowerCase()};request-id:${requestId};ts:${parts.ts};`;
+  const expected = crypto.createHmac("sha256", secret).update(manifest).digest("hex");
+  const a = Buffer.from(expected);
+  const b = Buffer.from(parts.v1);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 export async function POST(req: NextRequest) {
   try {
     const url = new URL(req.url);
-    const topic = url.searchParams.get("topic");
-    const id = url.searchParams.get("id") || url.searchParams.get("data_id");
-
-    // Parse body (MP sometimes sends JSON, sometimes query only)
     let body: any = {};
     try {
       body = await req.json();
@@ -25,103 +52,102 @@ export async function POST(req: NextRequest) {
       body = {};
     }
 
-    console.log("MP webhook received:", { topic, id, body });
+    // Formato novo: ?data.id=...&type=...   |   Formato antigo (IPN): ?topic=...&id=...
+    const topic: string | null =
+      url.searchParams.get("type") ||
+      url.searchParams.get("topic") ||
+      body?.type ||
+      body?.topic ||
+      null;
+    const dataId: string | null =
+      url.searchParams.get("data.id") ||
+      url.searchParams.get("id") ||
+      body?.data?.id?.toString() ||
+      null;
 
-    // Identify the preapproval ID from various payload formats
-    let preapprovalId: string | null = null;
-    if (topic === "preapproval" || topic === "subscription_preapproval") {
-      preapprovalId = id || body?.data?.id || body?.id;
-    } else if (topic === "payment") {
-      // For payment webhooks, we'd need to fetch the payment to find the preapproval
-      // MP payments reference the preapproval via order or metadata
-      const paymentId = id || body?.data?.id;
-      if (paymentId) {
-        // Try to find a user by recent subscription preapproval
-        const sub = await db.subscription.findFirst({
-          where: { mpPreapprovalId: { not: null } },
-          orderBy: { createdAt: "desc" },
-        });
-        if (sub?.mpPreapprovalId) preapprovalId = sub.mpPreapprovalId;
-      }
-    } else if (body?.type === "subscription_preapproval" || body?.type === "preapproval") {
-      preapprovalId = body?.data?.id || body?.id;
+    if (!topic || !dataId) {
+      return NextResponse.json({ ok: true, message: "ignored" });
+    }
+    if (!validSignature(req, dataId)) {
+      return NextResponse.json({ error: "Assinatura inválida" }, { status: 401 });
     }
 
+    // 1) descobrir o ID da assinatura (preapproval)
+    let preapprovalId: string | null = null;
+    if (topic === "preapproval" || topic === "subscription_preapproval") {
+      preapprovalId = dataId;
+    } else if (topic === "subscription_authorized_payment") {
+      const payment = await getAuthorizedPayment(dataId);
+      preapprovalId = payment?.preapproval_id ? String(payment.preapproval_id) : null;
+    } else {
+      return NextResponse.json({ ok: true, message: `ignored topic: ${topic}` });
+    }
     if (!preapprovalId) {
-      // Not a subscription event — acknowledge and exit
       return NextResponse.json({ ok: true, message: "ignored: no preapproval" });
     }
 
-    // Fetch the authoritative preapproval status from MP API
+    // 2) estado real da assinatura
     const preapproval = await getPreapproval(preapprovalId);
     if (!preapproval) {
-      console.error("MP webhook: could not fetch preapproval", preapprovalId);
-      return NextResponse.json({ ok: true, message: "preapproval not found" });
+      // erro temporário na API do MP → 500 para o Mercado Pago tentar de novo
+      return NextResponse.json({ error: "preapproval indisponível" }, { status: 500 });
     }
 
-    const userId = preapproval.external_reference || preapproval.payer_id;
+    const userId: string | undefined = preapproval.external_reference;
     if (!userId) {
-      console.error("MP webhook: no external_reference on preapproval", preapprovalId);
       return NextResponse.json({ ok: true, message: "no user ref" });
     }
 
+    const user = await db.user.findUnique({ where: { id: userId }, select: { id: true } });
+    if (!user) {
+      return NextResponse.json({ ok: true, message: "user not found" });
+    }
+
     const internalStatus = mapMpStatus(preapproval.status);
-    const planId = (preapproval.auto_recurring?.frequency_type === "years"
-      ? "annual"
-      : "monthly") as PlanId;
-    const amount = preapproval.auto_recurring?.transaction_amount || PLANS[planId].price;
+    const planId: PlanId =
+      preapproval.auto_recurring?.frequency_type === "years" ? "annual" : "monthly";
+    const amount: number = preapproval.auto_recurring?.transaction_amount || PLANS[planId].price;
 
-    // Compute next period end based on plan
-    const now = new Date();
-    const periodEnd = new Date(
-      now.getTime() +
-        (planId === "annual" ? 365 : 30) * 24 * 60 * 60 * 1000
-    );
+    // Fim do período = próxima cobrança informada pelo Mercado Pago
+    // (antes era "agora + 30 dias" a cada aviso, o que estendia o acesso sem pagamento)
+    const nextPayment = preapproval.next_payment_date ? new Date(preapproval.next_payment_date) : null;
+    const periodEnd = nextPayment && !isNaN(nextPayment.getTime()) ? nextPayment : null;
 
-    // Update user
-    await db.user.update({
-      where: { id: userId },
-      data: {
-        subscriptionStatus: internalStatus,
-        subscriptionId: preapprovalId,
-        plan: planId,
-        currentPeriodEnd: internalStatus === "active" ? periodEnd : undefined,
-      },
-    });
+    // "pending" (internalStatus null) não altera a conta: o cliente só abriu o checkout.
+    if (internalStatus) {
+      await db.user.update({
+        where: { id: userId },
+        data: {
+          subscriptionStatus: internalStatus,
+          subscriptionId: preapprovalId,
+          plan: planId,
+          ...(internalStatus === "active" && periodEnd ? { currentPeriodEnd: periodEnd } : {}),
+        },
+      });
+    }
 
-    // Log the subscription event
     await db.subscription.create({
       data: {
         userId,
         mpPreapprovalId: preapprovalId,
-        status: internalStatus,
+        status: internalStatus ?? "pending",
         plan: planId,
         amount,
         currency: "BRL",
-        currentPeriodEnd: internalStatus === "active" ? periodEnd : null,
-        event: `${topic || body?.type || "event"}:${preapproval.status}`,
+        currentPeriodEnd: periodEnd,
+        event: `${topic}:${preapproval.status}`,
       },
     });
 
-    console.log("MP webhook processed:", {
-      userId,
-      preapprovalId,
-      status: internalStatus,
-      plan: planId,
-    });
-
-    return NextResponse.json({ ok: true, status: internalStatus });
+    return NextResponse.json({ ok: true, status: internalStatus ?? "pending" });
   } catch (err: any) {
     console.error("MP webhook error:", err);
-    // Always return 200 to MP to avoid retries for non-recoverable errors
-    return NextResponse.json(
-      { ok: true, error: err?.message },
-      { status: 200 }
-    );
+    // 500 faz o Mercado Pago reenviar o aviso (ex.: banco fora do ar por alguns segundos)
+    return NextResponse.json({ error: "erro interno" }, { status: 500 });
   }
 }
 
-// MP sends a GET to validate the webhook URL
+// O Mercado Pago pode chamar GET só para validar a URL
 export async function GET() {
   return NextResponse.json({ ok: true, service: "mercadopago-webhook" });
 }
